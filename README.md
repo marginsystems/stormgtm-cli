@@ -55,8 +55,27 @@ stormgtm emails
 stormgtm sequences
 stormgtm sequence <sequence-id>
 stormgtm enroll <sequence-id> leads.csv
+stormgtm inbox --unread
+stormgtm inbox --folder sent --search pricing
+stormgtm thread <thread-id> --full
+stormgtm reply <thread-id> --text "Thanks, here is the pricing."
+echo "Thanks!" | stormgtm reply <thread-id>
+stormgtm read <thread-id> <thread-id>
 stormgtm me
 ```
+
+Radar (beta) finds people to email from a website or a description of your ideal customer:
+
+```bash
+stormgtm radar acme.io                       # progress on stderr, one lead per line on stdout, then a summary
+stormgtm radar "CTOs at seed-stage dev tools startups" --chat <chat-id> --json
+stormgtm leads [--chat <chat-id>]            # leads Radar saved, with verdicts once qualified
+stormgtm qualify-leads <lead-id> <lead-id> [--deep]
+```
+
+`radar` costs 1 credit per new lead with an email; searches that find nobody are free, and it exits 2 when it finds nobody. A search can take a minute or two. Qualify the leads before you send to them.
+
+`reply` answers an existing thread only, goes to the thread's participant and costs 1 credit. In a terminal it asks before sending; pass `--yes` to skip the question.
 
 `check` exits 2 when the lead is undeliverable, so it drops into shell pipelines.
 
@@ -64,7 +83,7 @@ stormgtm me
 | --- | --- |
 | 0 | Success |
 | 1 | Error (API or network) |
-| 2 | Lead undeliverable, or nothing was sent or enrolled |
+| 2 | Lead undeliverable, nothing was sent or enrolled, or Radar found no leads |
 | 3 | Usage error |
 | 4 | Not enough credits |
 | 6 | Not logged in, or the API key was rejected |
@@ -94,6 +113,31 @@ await stormgtm.reportOutcome({ email: "jane@acme.io", kind: "delivered" });
 ```
 
 `clientFromEnv()` reads the environment, then `~/.stormgtm/config.json`.
+
+Inbox:
+
+```ts
+const { threads, nextCursor } = await stormgtm.threads({ folder: "inbox", unread: true, q: "pricing" });
+const thread = await stormgtm.thread(threads[0].id);
+await stormgtm.reply(thread.id, { text: "Thanks, here is the pricing.", idempotencyKey: `reply-${thread.id}` });
+await stormgtm.markRead([thread.id]);
+await stormgtm.archiveThreads([thread.id]);
+```
+
+Radar:
+
+```ts
+const { chatId, answer, leads } = await stormgtm.findLeads({
+  content: "acme.io",
+  onEvent: (event) => {
+    if (event.type === "tool" && event.phase === "start") console.error(event.summary);
+  },
+});
+const { leads: checked } = await stormgtm.qualifyRadarLeads(leads.map((lead) => lead.id));
+const deliverable = checked.filter((lead) => lead.verdict === "deliverable");
+```
+
+`findLeads` creates a chat unless you pass `chatId`, streams the search and resolves when it finishes. It throws `StormGTMError` on an API error (for example `insufficient_credits`) or when the search fails. `radarChats`, `createRadarChat`, `radarMessages`, `radarLeads`, `deleteRadarLead` and `cancelRadarChat` cover the rest of the Radar API.
 
 ## MCP server
 

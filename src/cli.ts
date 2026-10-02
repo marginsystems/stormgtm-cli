@@ -3,6 +3,8 @@ import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { cmdLogin, cmdLogout, cmdWhoami } from "./commands/auth.js";
 import { cmdConfig, cmdKeys } from "./commands/config.js";
+import { cmdInbox, cmdRead, cmdReply, cmdThread, processIo, type InboxIo } from "./commands/inbox.js";
+import { cmdLeads, cmdQualifyLeads, cmdRadar } from "./commands/radar.js";
 import { cmdSkill } from "./commands/skill.js";
 import { VERSION } from "./version.js";
 import { resolveApiUrl } from "./config.js";
@@ -30,6 +32,12 @@ Leads
   stormgtm outcome <email> <delivered|bounced|replied|opened|complained>
   stormgtm me [--json]
 
+Radar (beta)
+  stormgtm radar "<website or description>" [--chat <chat-id>] [--json]
+                                 Finds people to email; 1 credit per new lead with an email, free if none. Exit 2 if none
+  stormgtm leads [--chat <chat-id>] [--json]
+  stormgtm qualify-leads <lead-id...> [--deep] [--json]
+
 Sending (beta)
   stormgtm send --from "Ada <ada@mail.example.com>" --to <email> --subject <text> (--text <body> | --html-file <file>) [--key <idempotency-key>] [--json]
   stormgtm domains [--json]
@@ -39,10 +47,17 @@ Sending (beta)
   stormgtm sequence <sequence-id> [--json]
   stormgtm enroll <sequence-id> <file.csv> [--json]   CSV with an email column; other columns become variables
 
+Inbox (beta)
+  stormgtm inbox [--folder inbox|sent|archived] [--unread] [--search <query>] [--cursor <cursor>] [--json]
+  stormgtm thread <thread-id> [--full] [--json]
+  stormgtm reply <thread-id> (--text <text> | < reply.txt) [--key <idempotency-key>] [--yes] [--json]
+                                 Replies to the thread's participant only; 1 credit. Asks first in a terminal unless --yes
+  stormgtm read <thread-id...> [--unread]
+
 Auth: "stormgtm login", or set STORMGTM_API_KEY. STORMGTM_API_URL overrides the API (default https://stormgtm.com).
 Config: ~/.stormgtm/config.json
 
-Exit codes: 0 ok, 1 error, 2 lead undeliverable or nothing sent, 3 usage, 4 out of credits, 6 not logged in or key rejected, 7 rate limited`;
+Exit codes: 0 ok, 1 error, 2 lead undeliverable, nothing sent or no leads found, 3 usage, 4 out of credits, 6 not logged in or key rejected, 7 rate limited`;
 
 function flag(args: string[], name: string): string | undefined {
   const index = args.indexOf(`--${name}`);
@@ -130,9 +145,9 @@ export function parseCsv(text: string): Array<{ email: string; context?: LeadCon
 
 const OUTCOME_KINDS: OutcomeKind[] = ["delivered", "bounced", "replied", "opened", "complained"];
 
-const KNOWN_COMMANDS = new Set(["me", "check", "batch", "batch-status", "outcome", "send", "domains", "domain-health", "emails", "sequences", "sequence", "enroll"]);
+const KNOWN_COMMANDS = new Set(["me", "check", "batch", "batch-status", "outcome", "send", "domains", "domain-health", "emails", "sequences", "sequence", "enroll", "inbox", "thread", "reply", "read", "radar", "leads", "qualify-leads"]);
 
-export async function main(argv: string[]): Promise<number> {
+export async function main(argv: string[], io: InboxIo = processIo): Promise<number> {
   const [command, ...args] = argv;
   if (!command || command === "help" || command === "--help" || command === "-h") {
     console.log(USAGE);
@@ -153,6 +168,14 @@ export async function main(argv: string[]): Promise<number> {
   const client = (): StormGTM => (cached ??= clientFromEnv());
   const json = has(args, "json");
   const tier: Tier = has(args, "deep") ? "deep" : "fast";
+
+  if (command === "inbox") return cmdInbox(args, client);
+  if (command === "thread") return cmdThread(args, client);
+  if (command === "reply") return cmdReply(args, client, io);
+  if (command === "read") return cmdRead(args, client);
+  if (command === "radar") return cmdRadar(args, client);
+  if (command === "leads") return cmdLeads(args, client);
+  if (command === "qualify-leads") return cmdQualifyLeads(args, client);
 
   if (command === "me") {
     const me = await client().me();

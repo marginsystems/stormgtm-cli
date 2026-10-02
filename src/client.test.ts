@@ -164,3 +164,37 @@ test("sequence CLI requests the API enrollment limit", async () => {
     else process.env.STORMGTM_API_URL = originalApiUrl;
   }
 });
+
+test("inbox calls use the inbox routes with query and body", async () => {
+  const { impl, calls } = fakeFetch((url) => ({ status: url.endsWith("/reply") ? 202 : 200, body: url.includes("/threads?") ? { threads: [], nextCursor: null } : { updated: 1 } }));
+  const client = new StormGTM({ apiKey: "k", baseUrl: "https://api.test", fetch: impl });
+  const page = await client.threads({ folder: "sent", unread: true, q: "pricing plan", cursor: "c1", limit: 10 });
+  await client.threads();
+  await client.thread("thr/1");
+  await client.reply("thr_1", { text: "Thanks", idempotencyKey: "r-1" });
+  await client.markRead(["thr_1", "thr_2"]);
+  await client.markRead(["thr_1"], false);
+  await client.archiveThreads(["thr_1"]);
+  assert.deepEqual(page, { threads: [], nextCursor: null });
+  assert.deepEqual(
+    calls.map((call) => `${call.init.method} ${call.url}`),
+    [
+      "GET https://api.test/v1/inbox/threads?folder=sent&unread=true&q=pricing+plan&cursor=c1&limit=10",
+      "GET https://api.test/v1/inbox/threads",
+      "GET https://api.test/v1/inbox/threads/thr%2F1",
+      "POST https://api.test/v1/inbox/threads/thr_1/reply",
+      "POST https://api.test/v1/inbox/threads/read",
+      "POST https://api.test/v1/inbox/threads/read",
+      "POST https://api.test/v1/inbox/threads/archive",
+    ],
+  );
+  assert.deepEqual(JSON.parse(String(calls[3]!.init.body)), { text: "Thanks", idempotencyKey: "r-1" });
+  assert.deepEqual(JSON.parse(String(calls[4]!.init.body)), { ids: ["thr_1", "thr_2"], read: true });
+  assert.deepEqual(JSON.parse(String(calls[5]!.init.body)), { ids: ["thr_1"], read: false });
+  assert.deepEqual(JSON.parse(String(calls[6]!.init.body)), { ids: ["thr_1"], archived: true });
+});
+
+test("a reply the API refuses throws StormGTMError", async () => {
+  const { impl } = fakeFetch(() => ({ status: 422, body: { error: { code: "suppressed", message: "This address bounced" } } }));
+  await assert.rejects(new StormGTM({ apiKey: "k", fetch: impl }).reply("thr_1", { text: "hi" }), (error: unknown) => error instanceof StormGTMError && error.code === "suppressed");
+});

@@ -1,6 +1,6 @@
 ---
 name: stormgtm-gtm
-description: Qualify every lead with StormGTM Barometer before emailing it, send only to deliverable addresses, report outcomes, and use Send and sequences for outreach.
+description: Find leads with StormGTM Radar, qualify every lead with Barometer before emailing it, send only to deliverable addresses, report outcomes, and use Send and sequences for outreach.
 ---
 
 # StormGTM
@@ -9,7 +9,7 @@ Use this skill to qualify leads with Barometer before you send anything, then se
 
 ## When to use
 
-Any time you are about to email an address you did not get from a verified source: cold outreach, a scraped or enriched list, a CSV import, a lead an agent found. Also when the user says check, verify, qualify, or "will this email land", or asks to send through their connected domains.
+Any time you are about to email an address you did not get from a verified source: cold outreach, a scraped or enriched list, a CSV import, a lead an agent found. Also when the user says check, verify, qualify, or "will this email land", or asks to send through their connected domains. Also when the user asks for leads, prospects or people to email for a website or an ideal customer.
 
 Not for newsletters to opted-in subscribers or transactional mail.
 
@@ -57,6 +57,14 @@ stormgtm login
 
 1. Prefer the `stormgtm` MCP server. Call `whoami`. If MCP is missing, require `stormgtm whoami --json` to exit 0. If neither works, stop and print the install commands above.
 2. Call `credits` (or `stormgtm me --json`). If the balance is 0, say so and stop.
+
+## Find leads with Radar
+
+Radar (beta) finds people to email from a website URL or a description of the ideal customer.
+
+1. Call `find_leads` with the URL or description (CLI: `stormgtm radar "acme.io"`). It can take a minute or two. Each new lead with an email costs 1 credit; searches that find nobody are free. Pass the returned `chatId` to refine the same search.
+2. Radar leads are not checked yet. Qualify them with `qualify_radar_leads` (CLI: `stormgtm qualify-leads <lead-id...>`), or with `check_lead` when you have more context.
+3. Send only to leads that come back `deliverable`, following the workflow below. `list_radar_leads` (CLI: `stormgtm leads`) shows leads found earlier with their verdicts.
 
 ## Workflow
 

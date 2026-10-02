@@ -1,8 +1,10 @@
 import { VERSION } from "./version.js";
 import { DEFAULT_API_URL, loadConfig, resolveApiKey, resolveApiUrl, type Config } from "./config.js";
 import { MissingApiKeyError, StormGTMError } from "./errors.js";
+import { SseDecoder } from "./sse.js";
 
 export { configPath, DEFAULT_API_URL, resolveApiKey, resolveApiUrl, type Config } from "./config.js";
+export { SseDecoder } from "./sse.js";
 export { CommandError, describeError, EXIT, MissingApiKeyError, NOT_LOGGED_IN, StormGTMError, type DescribedError } from "./errors.js";
 
 export type Verdict = "deliverable" | "risky" | "undeliverable" | "unknown";
@@ -218,6 +220,150 @@ export interface EnrollResult {
   maxCredits: number;
 }
 
+export type InboxFolder = "inbox" | "sent" | "archived";
+export type InboxDirection = "inbound" | "outbound";
+
+export interface InboxThread {
+  id: string;
+  subject: string;
+  counterpart: string;
+  participants: string[];
+  mailbox: string | null;
+  messageCount: number;
+  unreadCount: number;
+  unread: boolean;
+  snippet: string;
+  lastMessageAt: string;
+  archived: boolean;
+}
+
+export interface InboxAttachment {
+  id: string;
+  filename: string;
+  contentType: string;
+  size: number;
+  inline: boolean;
+  blocked: string | null;
+  downloadUrl: string | null;
+}
+
+export interface InboxMessageAuth {
+  spf: string | null;
+  dkim: string | null;
+  dmarc: string | null;
+  verifiedSender: boolean | null;
+}
+
+export interface InboxMessage {
+  id: string;
+  direction: InboxDirection;
+  from: string;
+  fromName: string | null;
+  to: string[];
+  cc: string[];
+  replyTo: string | null;
+  subject: string;
+  text: string | null;
+  replyText: string | null;
+  hasHtml: boolean;
+  at: string;
+  read: boolean;
+  auth: InboxMessageAuth;
+  attachments: InboxAttachment[];
+}
+
+export interface InboxThreadDetail extends InboxThread {
+  messages: InboxMessage[];
+}
+
+export interface ThreadsQuery {
+  folder?: InboxFolder;
+  unread?: boolean;
+  q?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface ThreadsPage {
+  threads: InboxThread[];
+  nextCursor: string | null;
+}
+
+export interface ReplyInput {
+  text: string;
+  html?: string;
+  from?: string;
+  idempotencyKey?: string;
+}
+
+export interface ReplyResult {
+  id: string;
+  threadId: string;
+  status: EmailStatus;
+  duplicate: boolean;
+  from: string;
+  to: string;
+  subject: string;
+}
+
+export interface RadarChat {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RadarMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface RadarLead {
+  id: string;
+  chatId: string | null;
+  email: string;
+  name: string | null;
+  title: string | null;
+  company: string | null;
+  companyHost: string | null;
+  sourceUrl: string;
+  note: string | null;
+  verdict: Verdict | null;
+  checkId: string | null;
+  createdAt: string;
+}
+
+export type RadarEvent =
+  | { type: "user_message"; message: RadarMessage }
+  | { type: "chat_renamed"; name: string }
+  | { type: "status"; stage: string; label?: string }
+  | { type: "thinking"; text: string }
+  | { type: "tool"; phase: "start" | "result"; name: string; summary: string; callId: string; isError?: boolean }
+  | { type: "delta"; text: string }
+  | { type: "leads"; leads: RadarLead[] }
+  | { type: "assistant_message"; message: RadarMessage }
+  | { type: "done" }
+  | { type: "error"; message: string; kind: string }
+  | { type: "ping" };
+
+export interface FindLeadsInput {
+  content: string;
+  chatId?: string;
+  onEvent?: (event: RadarEvent) => void;
+  signal?: AbortSignal;
+}
+
+export interface FindLeadsResult {
+  chatId: string;
+  answer: string;
+  leads: RadarLead[];
+}
+
+export const FIND_LEADS_TIMEOUT_MS = 5 * 60_000;
+
 export interface ClientOptions {
   apiKey: string;
   baseUrl?: string;
@@ -236,28 +382,24 @@ export class StormGTM {
     this.fetchImpl = options.fetch ?? fetch;
   }
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+  private open(method: string, path: string, body: unknown, signal: AbortSignal, accept?: string): Promise<Response> {
+    return this.fetchImpl(`${this.baseUrl}${path}`, {
       method,
       headers: {
         authorization: `Bearer ${this.options.apiKey}`,
         ...(body === undefined ? {} : { "content-type": "application/json" }),
+        ...(accept ? { accept } : {}),
         "user-agent": `stormgtm-client/${VERSION}`,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(this.options.timeoutMs ?? 60_000),
+      signal,
     });
-    const text = await response.text();
-    let data: unknown = null;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = text;
-    }
-    if (!response.ok && !(response.status === 422 && acceptsRejections(path, data))) {
-      const error = (data as { error?: { code?: string; message?: string } } | null)?.error;
-      throw new StormGTMError(response.status, error?.code ?? "http_error", error?.message ?? `HTTP ${response.status}`, data);
-    }
+  }
+
+  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const response = await this.open(method, path, body, AbortSignal.timeout(this.options.timeoutMs ?? 60_000));
+    const data = await readBody(response);
+    if (!response.ok && !(response.status === 422 && acceptsRejections(path, data))) throw apiFailure(response.status, data);
     return data as T;
   }
 
@@ -382,6 +524,119 @@ export class StormGTM {
   async setSendWindow(window: SendWindow | null): Promise<SendWindow | null> {
     return (await this.request<{ sendWindow: SendWindow | null }>("PUT", "/v1/send/settings", { sendWindow: window })).sendWindow;
   }
+
+  threads(query: ThreadsQuery = {}): Promise<ThreadsPage> {
+    const params = new URLSearchParams();
+    if (query.folder) params.set("folder", query.folder);
+    if (query.unread !== undefined) params.set("unread", String(query.unread));
+    if (query.q) params.set("q", query.q);
+    if (query.cursor) params.set("cursor", query.cursor);
+    if (query.limit !== undefined) params.set("limit", String(query.limit));
+    const search = params.toString();
+    return this.request("GET", `/v1/inbox/threads${search ? `?${search}` : ""}`);
+  }
+
+  thread(id: string): Promise<InboxThreadDetail> {
+    return this.request("GET", `/v1/inbox/threads/${encodeURIComponent(id)}`);
+  }
+
+  reply(threadId: string, input: ReplyInput): Promise<ReplyResult> {
+    return this.request("POST", `/v1/inbox/threads/${encodeURIComponent(threadId)}/reply`, input);
+  }
+
+  markRead(ids: string[], read = true): Promise<{ updated: number }> {
+    return this.request("POST", "/v1/inbox/threads/read", { ids, read });
+  }
+
+  archiveThreads(ids: string[], archived = true): Promise<{ updated: number }> {
+    return this.request("POST", "/v1/inbox/threads/archive", { ids, archived });
+  }
+
+  async radarChats(): Promise<RadarChat[]> {
+    return (await this.request<{ chats: RadarChat[] }>("GET", "/v1/radar/chats")).chats;
+  }
+
+  async createRadarChat(name?: string): Promise<RadarChat> {
+    return (await this.request<{ chat: RadarChat }>("POST", "/v1/radar/chats", name ? { name } : {})).chat;
+  }
+
+  radarMessages(chatId: string): Promise<{ chat: RadarChat; messages: RadarMessage[] }> {
+    return this.request("GET", `/v1/radar/chats/${encodeURIComponent(chatId)}/messages`);
+  }
+
+  async radarLeads(query: { chatId?: string } = {}): Promise<RadarLead[]> {
+    const search = query.chatId ? `?${new URLSearchParams({ chatId: query.chatId })}` : "";
+    return (await this.request<{ leads: RadarLead[] }>("GET", `/v1/radar/leads${search}`)).leads;
+  }
+
+  qualifyRadarLeads(ids: string[], tier?: Tier): Promise<{ leads: RadarLead[]; remaining: number }> {
+    return this.request("POST", "/v1/radar/leads/qualify", tier ? { ids, tier } : { ids });
+  }
+
+  deleteRadarLead(id: string): Promise<{ ok: true }> {
+    return this.request("DELETE", `/v1/radar/leads/${encodeURIComponent(id)}`);
+  }
+
+  cancelRadarChat(chatId: string): Promise<{ ok: true }> {
+    return this.request("POST", `/v1/radar/chats/${encodeURIComponent(chatId)}/cancel`);
+  }
+
+  async findLeads(input: FindLeadsInput): Promise<FindLeadsResult> {
+    const chatId = input.chatId ?? (await this.createRadarChat()).id;
+    const timeout = AbortSignal.timeout(FIND_LEADS_TIMEOUT_MS);
+    const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
+    const response = await this.open("POST", `/v1/radar/chats/${encodeURIComponent(chatId)}/message`, { content: input.content }, signal, "text/event-stream");
+    if (!response.ok) throw apiFailure(response.status, await readBody(response));
+    if (!response.body) throw new StormGTMError(response.status, "stream_missing", "The lead search returned no stream");
+    const leads = new Map<string, RadarLead>();
+    let answer: string | undefined;
+    let done = false;
+    const handle = (data: string) => {
+      let event: RadarEvent;
+      try {
+        event = JSON.parse(data) as RadarEvent;
+      } catch {
+        return;
+      }
+      if (!event || typeof event !== "object" || typeof event.type !== "string") return;
+      input.onEvent?.(event);
+      if (event.type === "leads") for (const lead of event.leads) leads.set(lead.id, lead);
+      else if (event.type === "assistant_message") answer = event.message.content;
+      else if (event.type === "done") done = true;
+      else if (event.type === "error") throw new StormGTMError(response.status, event.kind || "radar_error", event.message || "The lead search failed", event);
+    };
+    const decoder = new SseDecoder();
+    const text = new TextDecoder();
+    const reader = response.body.getReader();
+    try {
+      for (;;) {
+        const { value, done: ended } = await reader.read();
+        if (ended) break;
+        for (const data of decoder.push(text.decode(value, { stream: true }))) handle(data);
+      }
+      for (const data of decoder.push(text.decode())) handle(data);
+      for (const data of decoder.flush()) handle(data);
+    } catch (error) {
+      await reader.cancel().catch(() => undefined);
+      throw error;
+    }
+    if (answer === undefined && !done) throw new StormGTMError(response.status, "stream_incomplete", "The lead search ended before it finished; check radarLeads for anything it saved");
+    return { chatId, answer: answer ?? "", leads: [...leads.values()] };
+  }
+}
+
+async function readBody(response: Response): Promise<unknown> {
+  const text = await response.text();
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return text;
+  }
+}
+
+function apiFailure(status: number, data: unknown): StormGTMError {
+  const error = (data as { error?: { code?: string; message?: string } } | null)?.error;
+  return new StormGTMError(status, error?.code ?? "http_error", error?.message ?? `HTTP ${status}`, data);
 }
 
 function acceptsRejections(path: string, data: unknown): boolean {
