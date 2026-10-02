@@ -14,7 +14,7 @@ export interface HttpReply {
 
 export type PostJson = (path: string, body: unknown) => Promise<HttpReply>;
 
-export type LoginErrorCode = "expired_token" | "access_denied" | "already_redeemed" | "timeout" | "start_failed" | "unexpected";
+export type LoginErrorCode = "expired_token" | "access_denied" | "already_redeemed" | "invalid_grant" | "key_limit_reached" | "rate_limited" | "timeout" | "start_failed" | "unexpected";
 
 export class LoginError extends Error {
   constructor(
@@ -39,6 +39,7 @@ export interface PollOptions {
   intervalSeconds: number;
   expiresInSeconds: number;
   onPending?: () => void;
+  keysUrl?: string;
 }
 
 export const SLOW_DOWN_STEP_MS = 5000;
@@ -76,6 +77,9 @@ export async function startDeviceLogin(post: PostJson): Promise<DeviceStart> {
   }
   const deviceCode = field(reply.body, "device_code");
   const userCode = field(reply.body, "user_code");
+  if (reply.status === 429) {
+    throw new LoginError("rate_limited", "Too many sign-in attempts from this network. Wait a few minutes, or run `stormgtm login --key` to paste an API key instead.");
+  }
   if (reply.status !== 200 || typeof deviceCode !== "string" || typeof userCode !== "string") {
     throw new LoginError("start_failed", `Could not start browser login (HTTP ${reply.status}). Run \`stormgtm login --key\` to paste an API key instead.`);
   }
@@ -119,6 +123,10 @@ export async function pollDeviceLogin(options: PollOptions): Promise<DeviceAppro
     if (error === "expired_token") throw new LoginError("expired_token", "The login code expired. Run `stormgtm login` again.");
     if (error === "access_denied") throw new LoginError("access_denied", "Login was denied in the browser. Run `stormgtm login` to try again.");
     if (error === "already_redeemed") throw new LoginError("already_redeemed", "This login code was already used. Run `stormgtm login` again.");
+    if (error === "invalid_grant") throw new LoginError("invalid_grant", "This login code is not valid. Run `stormgtm login` again.");
+    if (error === "key_limit_reached") {
+      throw new LoginError("key_limit_reached", `You have reached the maximum number of active API keys. Revoke one at ${options.keysUrl ?? "https://stormgtm.com/app/keys"}, then run \`stormgtm login\` again.`);
+    }
     throw new LoginError("unexpected", `Login failed: ${typeof error === "string" ? error : `HTTP ${reply.status}`}`);
   }
   throw new LoginError("timeout", "Login timed out. Run `stormgtm login` again.");

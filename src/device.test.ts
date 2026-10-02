@@ -94,27 +94,40 @@ test("makePost sends json and parses replies", async () => {
   assert.equal(calls[0]!.init.body, JSON.stringify({ device_code: "d" }));
 });
 
-test("browser login falls back to API-key login when the device endpoint is missing", async () => {
+test("browser login stops with a hint instead of prompting when the device endpoint is missing", async () => {
   const originalFetch = globalThis.fetch;
   const originalApiUrl = process.env.STORMGTM_API_URL;
   let requestedUrl = "";
-  let fallbackCalled = false;
   process.env.STORMGTM_API_URL = "https://api.test";
   globalThis.fetch = (async (input: string | URL | Request) => {
     requestedUrl = String(input);
     return new Response("Not found", { status: 404 });
   }) as typeof fetch;
   try {
-    await loginWithBrowser(async () => {
-      fallbackCalled = true;
-    });
+    await assert.rejects(loginWithBrowser(), (error: unknown) => error instanceof LoginError && error.code === "start_failed" && /stormgtm login --key/.test(error.message));
     assert.equal(requestedUrl, "https://api.test/api/cli/device");
-    assert.equal(fallbackCalled, true);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalApiUrl === undefined) delete process.env.STORMGTM_API_URL;
     else process.env.STORMGTM_API_URL = originalApiUrl;
   }
+});
+
+test("a rate-limited start says to wait instead of failing generically", async () => {
+  await assert.rejects(
+    startDeviceLogin(async () => ({ status: 429, body: { error: { code: "rate_limited", message: "Too many" } } })),
+    (error: unknown) => error instanceof LoginError && error.code === "rate_limited" && /Wait a few minutes/.test(error.message),
+  );
+});
+
+test("a full key list and an unknown code each get a specific message", async () => {
+  const full = harness([{ status: 400, body: { error: "key_limit_reached" } }]);
+  await assert.rejects(
+    pollDeviceLogin({ ...full.options, keysUrl: "https://api.test/app/keys" }),
+    (error: unknown) => error instanceof LoginError && error.code === "key_limit_reached" && error.message.includes("https://api.test/app/keys"),
+  );
+  const invalid = harness([{ status: 400, body: { error: "invalid_grant" } }]);
+  await assert.rejects(pollDeviceLogin(invalid.options), (error: unknown) => error instanceof LoginError && error.code === "invalid_grant");
 });
 
 test("opens the browser with the platform opener", () => {

@@ -1,6 +1,6 @@
 {
   "name": "stormgtm",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "StormGTM CLI (stormgtm, sgtm) and typed client — qualify leads with Barometer before you send. MIT; source: https://github.com/marginsystems/stormgtm-cli",
   "license": "MIT",
   "type": "module",
@@ -17,8 +17,8 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "stormgtm": "./dist/cli.js",
-    "sgtm": "./dist/cli.js"
+    "stormgtm": "dist/cli.js",
+    "sgtm": "dist/cli.js"
   },
   "exports": {
     ".": {

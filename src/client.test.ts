@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { main, parseCsv } from "./cli.js";
-import { clientFromEnv, StormGTM, StormGTMError, summarize } from "./index.js";
+import { clientFromEnv, MissingApiKeyError, StormGTM, StormGTMError, summarize } from "./index.js";
 
 function fakeFetch(handler: (url: string, init: RequestInit) => { status: number; body: unknown }) {
   const calls: Array<{ url: string; init: RequestInit }> = [];
@@ -40,7 +40,7 @@ test("waitForBatch polls until completed", async () => {
 });
 
 test("clientFromEnv requires a key", () => {
-  assert.throws(() => clientFromEnv({}, undefined, {}), /STORMGTM_API_KEY/);
+  assert.throws(() => clientFromEnv({}, undefined, {}), (error: unknown) => error instanceof MissingApiKeyError && /STORMGTM_API_KEY/.test(error.message));
   assert.ok(clientFromEnv({ STORMGTM_API_KEY: "sgtm_live_x" }) instanceof StormGTM);
 });
 

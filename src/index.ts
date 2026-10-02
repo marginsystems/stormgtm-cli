@@ -1,7 +1,9 @@
 import { VERSION } from "./version.js";
 import { DEFAULT_API_URL, loadConfig, resolveApiKey, resolveApiUrl, type Config } from "./config.js";
+import { MissingApiKeyError, StormGTMError } from "./errors.js";
 
-export { configPath, DEFAULT_API_URL, type Config } from "./config.js";
+export { configPath, DEFAULT_API_URL, resolveApiKey, resolveApiUrl, type Config } from "./config.js";
+export { CommandError, describeError, EXIT, MissingApiKeyError, NOT_LOGGED_IN, StormGTMError, type DescribedError } from "./errors.js";
 
 export type Verdict = "deliverable" | "risky" | "undeliverable" | "unknown";
 export type Tier = "fast" | "deep";
@@ -216,18 +218,6 @@ export interface EnrollResult {
   maxCredits: number;
 }
 
-export class StormGTMError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    message: string,
-    readonly details?: unknown,
-  ) {
-    super(message);
-    this.name = "StormGTMError";
-  }
-}
-
 export interface ClientOptions {
   apiKey: string;
   baseUrl?: string;
@@ -401,7 +391,7 @@ function acceptsRejections(path: string, data: unknown): boolean {
 
 export function clientFromEnv(env: NodeJS.ProcessEnv = process.env, fetchImpl?: typeof fetch, config: Config = loadConfig()): StormGTM {
   const apiKey = resolveApiKey(env, config);
-  if (!apiKey) throw new Error("No API key found. Run `stormgtm login` or set STORMGTM_API_KEY to your key (sgtm_live_...)");
+  if (!apiKey) throw new MissingApiKeyError();
   return new StormGTM({ apiKey, baseUrl: resolveApiUrl(env, config), fetch: fetchImpl });
 }
 

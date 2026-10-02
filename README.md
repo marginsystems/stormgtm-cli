@@ -26,8 +26,11 @@ Add `-s -- --mcp` to also install the MCP server for agents.
 ```bash
 stormgtm login          # opens your browser, confirm the code, done
 stormgtm login --key    # paste an sgtm_live_... key (input is hidden)
-stormgtm whoami         # email, credits, API URL
+stormgtm whoami         # email, credits, key prefix, API URL (alias: status)
 stormgtm logout         # remove the stored key
+stormgtm keys           # open the API keys page in the dashboard
+stormgtm config         # where the key and API URL come from
+stormgtm config set api-url http://localhost:8787   # or: config unset api-url
 ```
 
 The key is stored in `~/.stormgtm/config.json` (mode 0600) as `{ "apiKey": "...", "apiUrl": "..." }`. Environment variables win over the file:
@@ -55,7 +58,18 @@ stormgtm enroll <sequence-id> leads.csv
 stormgtm me
 ```
 
-`check` exits 2 when the lead is undeliverable, so it drops into shell pipelines. Add `--json` to any command for machine-readable output. CSV files for `batch` need an `email` column; `name`, `company`, `companyDomain`, `title`, `githubLogin` and other context columns are passed along.
+`check` exits 2 when the lead is undeliverable, so it drops into shell pipelines.
+
+| Exit code | Meaning |
+| --- | --- |
+| 0 | Success |
+| 1 | Error (API or network) |
+| 2 | Lead undeliverable, or nothing was sent or enrolled |
+| 3 | Usage error |
+| 4 | Not enough credits |
+| 6 | Not logged in, or the API key was rejected |
+| 7 | Rate limited |
+ Add `--json` to any command for machine-readable output. CSV files for `batch` need an `email` column; `name`, `company`, `companyDomain`, `title`, `githubLogin` and other context columns are passed along.
 
 ## Agent skills
 

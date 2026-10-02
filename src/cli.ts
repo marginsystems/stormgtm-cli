@@ -2,31 +2,47 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { cmdLogin, cmdLogout, cmdWhoami } from "./commands/auth.js";
+import { cmdConfig, cmdKeys } from "./commands/config.js";
 import { cmdSkill } from "./commands/skill.js";
 import { VERSION } from "./version.js";
-import { clientFromEnv, StormGTMError, summarize, type LeadContext, type OutcomeKind, type Tier } from "./index.js";
+import { resolveApiUrl } from "./config.js";
+import { CommandError, describeError, EXIT, usageError } from "./errors.js";
+import { clientFromEnv, summarize, type LeadContext, type StormGTM, type OutcomeKind, type Tier } from "./index.js";
 
-const USAGE = `stormgtm ${VERSION} — StormGTM CLI (also installed as sgtm)
+export const USAGE = `stormgtm ${VERSION}: qualify leads and send to the ones worth emailing (also installed as sgtm)
 
-  stormgtm login [--key]
-  stormgtm logout
-  stormgtm whoami [--json]
+Account
+  stormgtm login                 Sign in through the browser and save an API key
+  stormgtm login --key           Paste an existing API key instead (headless, CI)
+  stormgtm logout                Remove the saved API key
+  stormgtm whoami [--json]       Account, credits, key and API URL (alias: status)
+  stormgtm keys                  Open the API keys page in the dashboard
+  stormgtm config [--json]       Show where the key and API URL come from
+  stormgtm config set api-url <url> | unset api-url | path
+
+Agents
   stormgtm skill install --claude|--cursor|--agents [--json]
-  stormgtm me
+
+Leads
   stormgtm check <email> [--deep] [--name "Jane Doe"] [--company Acme] [--github janedoe] [--json]
   stormgtm batch <file.csv> [--deep] [--wait] [--json]
   stormgtm batch-status <batch-id> [--json]
   stormgtm outcome <email> <delivered|bounced|replied|opened|complained>
+  stormgtm me [--json]
+
+Sending (beta)
   stormgtm send --from "Ada <ada@mail.example.com>" --to <email> --subject <text> (--text <body> | --html-file <file>) [--key <idempotency-key>] [--json]
   stormgtm domains [--json]
   stormgtm domain-health <domain-id> [--json]
   stormgtm emails [--json]
   stormgtm sequences [--json]
   stormgtm sequence <sequence-id> [--json]
-  stormgtm enroll <sequence-id> <file.csv> [--json]   (CSV with an email column; other columns become variables)
+  stormgtm enroll <sequence-id> <file.csv> [--json]   CSV with an email column; other columns become variables
 
-Auth: run "stormgtm login", or set STORMGTM_API_KEY. STORMGTM_API_URL overrides the API (default https://stormgtm.com).
-Config: ~/.stormgtm/config.json`;
+Auth: "stormgtm login", or set STORMGTM_API_KEY. STORMGTM_API_URL overrides the API (default https://stormgtm.com).
+Config: ~/.stormgtm/config.json
+
+Exit codes: 0 ok, 1 error, 2 lead undeliverable or nothing sent, 3 usage, 4 out of credits, 6 not logged in or key rejected, 7 rate limited`;
 
 function flag(args: string[], name: string): string | undefined {
   const index = args.indexOf(`--${name}`);
@@ -112,32 +128,40 @@ export function parseCsv(text: string): Array<{ email: string; context?: LeadCon
     .filter((lead) => lead.email);
 }
 
+const OUTCOME_KINDS: OutcomeKind[] = ["delivered", "bounced", "replied", "opened", "complained"];
+
+const KNOWN_COMMANDS = new Set(["me", "check", "batch", "batch-status", "outcome", "send", "domains", "domain-health", "emails", "sequences", "sequence", "enroll"]);
+
 export async function main(argv: string[]): Promise<number> {
   const [command, ...args] = argv;
-  if (!command || command === "help" || command === "--help") {
+  if (!command || command === "help" || command === "--help" || command === "-h") {
     console.log(USAGE);
-    return command ? 0 : 1;
+    return EXIT.ok;
   }
   if (command === "--version" || command === "-v" || command === "version") {
     console.log(VERSION);
-    return 0;
+    return EXIT.ok;
   }
   if (command === "login") return cmdLogin(args);
   if (command === "logout") return cmdLogout();
-  if (command === "whoami") return cmdWhoami(args);
+  if (command === "whoami" || command === "status") return cmdWhoami(args);
+  if (command === "config") return cmdConfig(args);
+  if (command === "keys") return cmdKeys();
   if (command === "skill") return cmdSkill(args);
-  const client = clientFromEnv();
+  if (!KNOWN_COMMANDS.has(command)) throw new CommandError(`Unknown command: ${command}. Run \`stormgtm help\` to see all commands.`, EXIT.usage);
+  let cached: StormGTM | undefined;
+  const client = (): StormGTM => (cached ??= clientFromEnv());
   const json = has(args, "json");
   const tier: Tier = has(args, "deep") ? "deep" : "fast";
 
   if (command === "me") {
-    const me = await client.me();
+    const me = await client().me();
     console.log(json ? JSON.stringify(me, null, 2) : `${me.email}: ${me.credits} credits (fast ${me.pricing.fast}, deep ${me.pricing.deep})`);
-    return 0;
+    return EXIT.ok;
   }
   if (command === "check") {
     const email = args[0];
-    if (!email || email.startsWith("--")) throw new Error("stormgtm check <email>");
+    if (!email || email.startsWith("--")) throw usageError("stormgtm check <email>");
     const context: LeadContext = {};
     const name = flag(args, "name");
     const company = flag(args, "company");
@@ -145,38 +169,38 @@ export async function main(argv: string[]): Promise<number> {
     if (name) context.name = name;
     if (company) context.company = company;
     if (github) context.githubLogin = github;
-    const result = await client.check({ email, tier, context: Object.keys(context).length ? context : undefined });
+    const result = await client().check({ email, tier, context: Object.keys(context).length ? context : undefined });
     console.log(json ? JSON.stringify(result, null, 2) : summarize(result));
-    return result.verdict === "undeliverable" ? 2 : 0;
+    return result.verdict === "undeliverable" ? EXIT.rejected : EXIT.ok;
   }
   if (command === "batch") {
     const file = args[0];
-    if (!file) throw new Error("stormgtm batch <file.csv>");
+    if (!file) throw usageError("stormgtm batch <file.csv>");
     const leads = parseCsv(readFileSync(file, "utf8"));
-    const created = await client.createBatch({ leads, tier });
+    const created = await client().createBatch({ leads, tier });
     if (!has(args, "wait")) {
       console.log(json ? JSON.stringify(created, null, 2) : `batch ${created.id} queued: ${created.total} leads, up to ${created.maxCredits} credits`);
-      return 0;
+      return EXIT.ok;
     }
-    const status = await client.waitForBatch(created.id);
+    const status = await client().waitForBatch(created.id);
     if (json) console.log(JSON.stringify(status, null, 2));
     else for (const row of status.results) console.log(row.result ? summarize(row.result) : `${row.email}: ${row.status}`);
-    return 0;
+    return EXIT.ok;
   }
   if (command === "batch-status") {
     const id = args[0];
-    if (!id) throw new Error("stormgtm batch-status <id>");
-    const status = await client.batch(id, { limit: 1000 });
+    if (!id) throw usageError("stormgtm batch-status <id>");
+    const status = await client().batch(id, { limit: 1000 });
     if (json) console.log(JSON.stringify(status, null, 2));
     else console.log(`${status.id}: ${status.status} ${status.done}/${status.total}`);
-    return 0;
+    return EXIT.ok;
   }
   if (command === "outcome") {
     const [email, kind] = args;
-    if (!email || !kind) throw new Error("stormgtm outcome <email> <kind>");
-    const result = await client.reportOutcome({ email, kind: kind as OutcomeKind });
+    if (!email || !kind || !OUTCOME_KINDS.includes(kind as OutcomeKind)) throw usageError(`stormgtm outcome <email> <${OUTCOME_KINDS.join("|")}>`);
+    const result = await client().reportOutcome({ email, kind: kind as OutcomeKind });
     console.log(json ? JSON.stringify(result) : `recorded ${result.recorded}`);
-    return 0;
+    return EXIT.ok;
   }
   if (command === "send") {
     const from = flag(args, "from");
@@ -184,76 +208,76 @@ export async function main(argv: string[]): Promise<number> {
     const subject = flag(args, "subject");
     const text = flag(args, "text");
     const htmlFile = flag(args, "html-file");
-    if (!from || !to || !subject || (!text && !htmlFile)) throw new Error('stormgtm send --from <sender> --to <email> --subject <text> (--text <body> | --html-file <file>)');
-    const result = await client.send({ from, to, subject, text, html: htmlFile ? readFileSync(htmlFile, "utf8") : undefined, idempotencyKey: flag(args, "key") });
+    if (!from || !to || !subject || (!text && !htmlFile)) throw usageError("stormgtm send --from <sender> --to <email> --subject <text> (--text <body> | --html-file <file>)");
+    const result = await client().send({ from, to, subject, text, html: htmlFile ? readFileSync(htmlFile, "utf8") : undefined, idempotencyKey: flag(args, "key") });
     if (json) console.log(JSON.stringify(result, null, 2));
     else {
       for (const entry of result.accepted) console.log(`queued ${entry.id} → ${entry.to}`);
       for (const entry of result.rejected) console.log(`rejected: ${entry.code} — ${entry.message}`);
     }
-    return result.accepted.length > 0 ? 0 : 2;
+    return result.accepted.length > 0 ? EXIT.ok : EXIT.rejected;
   }
   if (command === "domains") {
-    const domains = await client.domains();
+    const domains = await client().domains();
     if (json) console.log(JSON.stringify(domains, null, 2));
     else for (const domain of domains) console.log(`${domain.id}  ${domain.name}  ${domain.status}  ${domain.warmup.paused ? "paused" : `${domain.warmup.dailyCap}/day`}`);
-    return 0;
+    return EXIT.ok;
   }
   if (command === "domain-health") {
     const id = args[0];
-    if (!id || id.startsWith("--")) throw new Error("stormgtm domain-health <domain-id>");
-    const health = await client.domainHealth(id);
+    if (!id || id.startsWith("--")) throw usageError("stormgtm domain-health <domain-id>");
+    const health = await client().domainHealth(id);
     if (json) console.log(JSON.stringify(health, null, 2));
     else
       console.log(
         `${health.name}: ${health.warmup.paused ? `paused (${health.warmup.pausedReason ?? "manual"})` : `${health.warmup.remainingToday}/${health.warmup.dailyCap} left today`}, 7d ${health.last7Days.sent} sent, ${(health.last7Days.bounceRate * 100).toFixed(1)}% bounced`,
       );
-    return 0;
+    return EXIT.ok;
   }
   if (command === "emails") {
-    const emails = await client.emails();
+    const emails = await client().emails();
     if (json) console.log(JSON.stringify(emails, null, 2));
     else for (const email of emails) console.log(`${email.id}  ${email.to}  ${email.status}/${email.delivery}  ${email.subject}`);
-    return 0;
+    return EXIT.ok;
   }
   if (command === "sequences") {
-    const sequences = await client.sequences();
+    const sequences = await client().sequences();
     if (json) console.log(JSON.stringify(sequences, null, 2));
     else for (const entry of sequences) console.log(`${entry.id}  ${entry.name}  ${entry.steps} steps  ${entry.counts.active} active / ${entry.counts.completed} completed / ${entry.counts.stopped} stopped`);
-    return 0;
+    return EXIT.ok;
   }
   if (command === "sequence") {
     const id = args[0];
-    if (!id || id.startsWith("--")) throw new Error("stormgtm sequence <sequence-id>");
-    const [sequence, enrollments] = await Promise.all([client.sequence(id), client.enrollments(id, 500)]);
+    if (!id || id.startsWith("--")) throw usageError("stormgtm sequence <sequence-id>");
+    const [sequence, enrollments] = await Promise.all([client().sequence(id), client().enrollments(id, 500)]);
     if (json) console.log(JSON.stringify({ sequence, enrollments }, null, 2));
     else {
       console.log(`${sequence.id}  ${sequence.name}  from ${sequence.from}  variables: ${sequence.variables.join(", ") || "none"}`);
       for (const entry of enrollments) console.log(`  ${entry.email}  ${entry.status}${entry.stopReason ? ` (${entry.stopReason})` : ""}`);
     }
-    return 0;
+    return EXIT.ok;
   }
   if (command === "enroll") {
     const [id, file] = args;
-    if (!id || !file) throw new Error("stormgtm enroll <sequence-id> <file.csv>");
-    const result = await client.enroll(id, parseEnrollCsv(readFileSync(file, "utf8")));
+    if (!id || !file) throw usageError("stormgtm enroll <sequence-id> <file.csv>");
+    const result = await client().enroll(id, parseEnrollCsv(readFileSync(file, "utf8")));
     if (json) console.log(JSON.stringify(result, null, 2));
     else {
       console.log(`${result.accepted.filter((entry) => !entry.duplicate).length} enrolled, ${result.rejected.length} rejected, up to ${result.maxCredits} credits`);
       for (const entry of result.rejected) console.log(`  row ${entry.index + 1}: ${entry.code} — ${entry.message}`);
     }
-    return result.accepted.length > 0 ? 0 : 2;
+    return result.accepted.length > 0 ? EXIT.ok : EXIT.rejected;
   }
-  console.error(USAGE);
-  return 1;
+  throw new CommandError(`Unknown command: ${command}. Run \`stormgtm help\` to see all commands.`, EXIT.usage);
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (error: unknown) => {
-      console.error(error instanceof StormGTMError ? `${error.code}: ${error.message}` : error instanceof Error ? error.message : String(error));
-      process.exit(1);
+      const { message, exitCode } = describeError(error, resolveApiUrl());
+      console.error(message);
+      process.exit(exitCode);
     },
   );
 }
