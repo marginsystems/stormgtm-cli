@@ -175,6 +175,8 @@ test("inbox calls use the inbox routes with query and body", async () => {
   await client.markRead(["thr_1", "thr_2"]);
   await client.markRead(["thr_1"], false);
   await client.archiveThreads(["thr_1"]);
+  await client.spamThreads(["thr_1"]);
+  await client.spamThreads(["thr_1"], false);
   assert.deepEqual(page, { threads: [], nextCursor: null });
   assert.deepEqual(
     calls.map((call) => `${call.init.method} ${call.url}`),
@@ -186,12 +188,16 @@ test("inbox calls use the inbox routes with query and body", async () => {
       "POST https://api.test/v1/inbox/threads/read",
       "POST https://api.test/v1/inbox/threads/read",
       "POST https://api.test/v1/inbox/threads/archive",
+      "POST https://api.test/v1/inbox/threads/spam",
+      "POST https://api.test/v1/inbox/threads/spam",
     ],
   );
   assert.deepEqual(JSON.parse(String(calls[3]!.init.body)), { text: "Thanks", idempotencyKey: "r-1" });
   assert.deepEqual(JSON.parse(String(calls[4]!.init.body)), { ids: ["thr_1", "thr_2"], read: true });
   assert.deepEqual(JSON.parse(String(calls[5]!.init.body)), { ids: ["thr_1"], read: false });
   assert.deepEqual(JSON.parse(String(calls[6]!.init.body)), { ids: ["thr_1"], archived: true });
+  assert.deepEqual(JSON.parse(String(calls[7]!.init.body)), { ids: ["thr_1"], spam: true });
+  assert.deepEqual(JSON.parse(String(calls[8]!.init.body)), { ids: ["thr_1"], spam: false });
 });
 
 test("a reply the API refuses throws StormGTMError", async () => {

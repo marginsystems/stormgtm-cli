@@ -2,12 +2,14 @@ import { createInterface } from "node:readline/promises";
 import { CommandError, EXIT, usageError } from "../errors.js";
 import type { InboxFolder, InboxMessage, InboxThread, StormGTM } from "../index.js";
 
-export const INBOX_USAGE = "stormgtm inbox [--folder inbox|sent|archived] [--unread] [--search <query>] [--cursor <cursor>] [--json]";
+export const INBOX_USAGE = "stormgtm inbox [--folder inbox|sent|archived|spam] [--unread] [--search <query>] [--cursor <cursor>] [--json]";
 export const THREAD_USAGE = "stormgtm thread <thread-id> [--full] [--json]";
 export const REPLY_USAGE = "stormgtm reply <thread-id> (--text <text> | < reply.txt) [--key <idempotency-key>] [--yes] [--json]";
 export const READ_USAGE = "stormgtm read <thread-id...> [--unread]";
+export const ARCHIVE_USAGE = "stormgtm archive|unarchive|spam|unspam|unread <thread-id...>";
+export const COUNTS_USAGE = "stormgtm counts [--json]";
 
-const FOLDERS: InboxFolder[] = ["inbox", "sent", "archived"];
+const FOLDERS: InboxFolder[] = ["inbox", "sent", "archived", "spam"];
 const VALUE_FLAGS = new Set(["--folder", "--search", "--cursor", "--text", "--key"]);
 
 export interface InboxIo {
@@ -139,5 +141,38 @@ export async function cmdRead(args: string[], client: () => StormGTM): Promise<n
   const result = await client().markRead(ids, read);
   if (result.updated === 0) throw new CommandError("No matching threads.", EXIT.failed);
   console.log(`Marked ${result.updated} thread${result.updated === 1 ? "" : "s"} ${read ? "read" : "unread"}.`);
+  return EXIT.ok;
+}
+
+const THREAD_ACTIONS = {
+  archive: { done: "archived", run: (client: StormGTM, ids: string[]) => client.archiveThreads(ids, true) },
+  unarchive: { done: "moved back to the inbox", run: (client: StormGTM, ids: string[]) => client.archiveThreads(ids, false) },
+  spam: { done: "marked as spam (senders will never be emailed again)", run: (client: StormGTM, ids: string[]) => client.spamThreads(ids, true) },
+  unspam: { done: "moved out of spam", run: (client: StormGTM, ids: string[]) => client.spamThreads(ids, false) },
+  unread: { done: "marked unread", run: (client: StormGTM, ids: string[]) => client.markRead(ids, false) },
+} as const;
+
+export type ThreadAction = keyof typeof THREAD_ACTIONS;
+
+export function isThreadAction(command: string): command is ThreadAction {
+  return command in THREAD_ACTIONS;
+}
+
+export async function cmdThreadAction(action: ThreadAction, args: string[], client: () => StormGTM): Promise<number> {
+  const ids = positionals(args);
+  if (ids.length === 0) throw usageError(ARCHIVE_USAGE);
+  const spec = THREAD_ACTIONS[action];
+  const result = await spec.run(client(), ids);
+  if (result.updated === 0) throw new CommandError("No matching threads.", EXIT.failed);
+  console.log(`${result.updated} thread${result.updated === 1 ? "" : "s"} ${spec.done}.`);
+  return EXIT.ok;
+}
+
+export async function cmdCounts(args: string[], client: () => StormGTM): Promise<number> {
+  const counts = await client().inboxCounts();
+  if (has(args, "json")) console.log(JSON.stringify(counts, null, 2));
+  else {
+    for (const folder of FOLDERS) console.log(`${folder.padEnd(9)} ${String(counts[folder].total).padStart(5)}${counts[folder].unread > 0 ? `  (${counts[folder].unread} unread)` : ""}`);
+  }
   return EXIT.ok;
 }

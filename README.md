@@ -61,6 +61,12 @@ stormgtm thread <thread-id> --full
 stormgtm reply <thread-id> --text "Thanks, here is the pricing."
 echo "Thanks!" | stormgtm reply <thread-id>
 stormgtm read <thread-id> <thread-id>
+stormgtm unread <thread-id>
+stormgtm archive <thread-id>
+stormgtm unarchive <thread-id>
+stormgtm spam <thread-id>
+stormgtm unspam <thread-id>
+stormgtm counts
 stormgtm me
 ```
 
@@ -122,6 +128,8 @@ const thread = await stormgtm.thread(threads[0].id);
 await stormgtm.reply(thread.id, { text: "Thanks, here is the pricing.", idempotencyKey: `reply-${thread.id}` });
 await stormgtm.markRead([thread.id]);
 await stormgtm.archiveThreads([thread.id]);
+await stormgtm.spamThreads([thread.id]);
+const counts = await stormgtm.inboxCounts();
 ```
 
 Radar:

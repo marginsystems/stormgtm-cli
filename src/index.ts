@@ -220,13 +220,14 @@ export interface EnrollResult {
   maxCredits: number;
 }
 
-export type InboxFolder = "inbox" | "sent" | "archived";
+export type InboxFolder = "inbox" | "sent" | "archived" | "spam";
 export type InboxDirection = "inbound" | "outbound";
 
 export interface InboxThread {
   id: string;
   subject: string;
   counterpart: string;
+  counterpartName?: string | null;
   participants: string[];
   mailbox: string | null;
   messageCount: number;
@@ -235,6 +236,8 @@ export interface InboxThread {
   snippet: string;
   lastMessageAt: string;
   archived: boolean;
+  spam: boolean;
+  hasAttachment: boolean;
 }
 
 export interface InboxAttachment {
@@ -288,6 +291,13 @@ export interface ThreadsPage {
   threads: InboxThread[];
   nextCursor: string | null;
 }
+
+export interface FolderCount {
+  total: number;
+  unread: number;
+}
+
+export type InboxCounts = Record<InboxFolder, FolderCount>;
 
 export interface ReplyInput {
   text: string;
@@ -550,6 +560,14 @@ export class StormGTM {
 
   archiveThreads(ids: string[], archived = true): Promise<{ updated: number }> {
     return this.request("POST", "/v1/inbox/threads/archive", { ids, archived });
+  }
+
+  spamThreads(ids: string[], spam = true): Promise<{ updated: number }> {
+    return this.request("POST", "/v1/inbox/threads/spam", { ids, spam });
+  }
+
+  async inboxCounts(): Promise<InboxCounts> {
+    return (await this.request<{ counts: InboxCounts }>("GET", "/v1/inbox/counts")).counts;
   }
 
   async radarChats(): Promise<RadarChat[]> {

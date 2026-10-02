@@ -83,7 +83,7 @@ Radar (beta) finds people to email from a website URL or a description of the id
 
 A sequence sends a series of follow-up emails per lead and stops by itself when the lead replies, unsubscribes, bounces or complains.
 
-1. Create it once per campaign with `create_sequence`: a name, a sender on a verified domain, a `replyTo` on a receiving domain so replies are caught, and up to 10 steps, each with `delayHours`, a subject and a body. Use `{{firstName}}`-style placeholders. The result lists the variables each lead needs.
+1. Create it once per campaign with `create_sequence`: a name, a sender on a verified domain with receiving turned on so replies are caught, and up to 10 steps, each with `delayHours`, a subject and a body. Use `{{firstName}}`-style placeholders. The result lists the variables each lead needs.
 2. Enroll only leads that passed a check with `enroll_leads`, giving every variable the sequence needs. Enrolling the same lead twice does nothing. CLI: `stormgtm enroll <sequence-id> leads.csv`, where the `email` column is the address and the other columns are variables.
 3. Follow progress with `sequence_status` (CLI: `stormgtm sequences`, `stormgtm sequence <sequence-id>`). Stop one lead with `stop_enrollment`.
 

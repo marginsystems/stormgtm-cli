@@ -17,6 +17,8 @@ const thread: InboxThread = {
   snippet: "Can you send pricing?",
   lastMessageAt: "2026-10-01T09:30:00.000Z",
   archived: false,
+  spam: false,
+  hasAttachment: false,
 };
 
 const message: InboxMessage = {
@@ -89,7 +91,7 @@ test("inbox lists threads with folder, unread and search filters", async () => {
 });
 
 test("inbox rejects an unknown folder and a missing search query", async () => {
-  await assert.rejects(run(["inbox", "--folder", "spam"]), isUsage);
+  await assert.rejects(run(["inbox", "--folder", "trash"]), isUsage);
   await assert.rejects(run(["inbox", "--search"]), isUsage);
 });
 
@@ -142,6 +144,33 @@ test("read marks threads read or unread", async () => {
   assert.deepEqual(unread.calls[0]!.body, { ids: ["thr_1"], read: false });
   await assert.rejects(run(["read"]), isUsage);
   await assert.rejects(run(["read", "thr_x"], {}, () => ({ status: 200, body: { updated: 0 } })), (error: unknown) => error instanceof CommandError && error.exitCode === EXIT.failed);
+});
+
+test("archive, spam and unread commands call the matching routes", async () => {
+  const updated = () => ({ status: 200, body: { updated: 2 } });
+  const cases: Array<[string, string, Record<string, unknown>, RegExp]> = [
+    ["archive", "archive", { archived: true }, /2 threads archived/],
+    ["unarchive", "archive", { archived: false }, /moved back to the inbox/],
+    ["spam", "spam", { spam: true }, /never be emailed again/],
+    ["unspam", "spam", { spam: false }, /moved out of spam/],
+    ["unread", "read", { read: false }, /marked unread/],
+  ];
+  for (const [command, route, extra, message] of cases) {
+    const result = await run([command, "thr_1", "thr_2"], {}, updated);
+    assert.deepEqual(result.calls[0], { method: "POST", url: `https://api.test/v1/inbox/threads/${route}`, body: { ids: ["thr_1", "thr_2"], ...extra } });
+    assert.match(result.out, message);
+    await assert.rejects(run([command]), isUsage);
+  }
+  await assert.rejects(run(["spam", "thr_x"], {}, () => ({ status: 200, body: { updated: 0 } })), (error: unknown) => error instanceof CommandError && error.exitCode === EXIT.failed);
+});
+
+test("counts prints a line per folder and JSON on request", async () => {
+  const counts = { inbox: { total: 5, unread: 2 }, sent: { total: 1, unread: 0 }, archived: { total: 0, unread: 0 }, spam: { total: 3, unread: 3 } };
+  const text = await run(["counts"], {}, () => ({ status: 200, body: { counts } }));
+  assert.equal(text.calls[0]!.url, "https://api.test/v1/inbox/counts");
+  assert.match(text.out, /inbox +5 {2}\(2 unread\)/);
+  assert.match(text.out, /spam +3 {2}\(3 unread\)/);
+  assert.deepEqual(JSON.parse((await run(["counts", "--json"], {}, () => ({ status: 200, body: { counts } }))).out), counts);
 });
 
 test("helpers skip flag values and format empty states", () => {
