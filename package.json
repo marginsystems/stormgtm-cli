@@ -1,0 +1,59 @@
+{
+  "name": "stormgtm",
+  "version": "0.1.0",
+  "description": "StormGTM CLI (stormgtm, sgtm) and typed client — qualify leads with Barometer before you send. MIT; source: https://github.com/marginsystems/stormgtm-cli",
+  "license": "MIT",
+  "type": "module",
+  "author": "Margin Systems <hello@stormgtm.com>",
+  "keywords": [
+    "stormgtm",
+    "barometer",
+    "email",
+    "deliverability",
+    "lead-qualification",
+    "cli",
+    "mcp"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "stormgtm": "./dist/cli.js",
+    "sgtm": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "homepage": "https://stormgtm.com/docs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marginsystems/stormgtm-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/marginsystems/stormgtm-cli/issues"
+  },
+  "files": [
+    "dist",
+    "skill",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test \"src/**/*.test.ts\"",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build && node dist/cli.js --version"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
