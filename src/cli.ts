@@ -4,12 +4,12 @@ import { fileURLToPath } from "node:url";
 import { cmdLogin, cmdLogout, cmdWhoami } from "./commands/auth.js";
 import { cmdConfig, cmdKeys } from "./commands/config.js";
 import { cmdCounts, cmdInbox, cmdRead, cmdReply, cmdThread, cmdThreadAction, isThreadAction, processIo, type InboxIo } from "./commands/inbox.js";
-import { cmdLeads, cmdQualifyLeads, cmdRadar } from "./commands/radar.js";
+import { cmdAddLeads, cmdLeads, cmdLeadsforge, cmdQualifyLeads, cmdRadar } from "./commands/radar.js";
 import { cmdSkill } from "./commands/skill.js";
 import { VERSION } from "./version.js";
 import { resolveApiUrl } from "./config.js";
 import { CommandError, describeError, EXIT, usageError } from "./errors.js";
-import { clientFromEnv, summarize, type LeadContext, type StormGTM, type OutcomeKind, type Tier } from "./index.js";
+import { clientFromEnv, summarize, type LeadContext, type Mailbox, type MailboxDomain, type StormGTM, type OutcomeKind, type Tier } from "./index.js";
 
 export const USAGE = `stormgtm ${VERSION}: qualify leads and send to the ones worth emailing (also installed as sgtm)
 
@@ -34,12 +34,24 @@ Leads
 
 Radar (beta)
   stormgtm radar "<website or description>" [--chat <chat-id>] [--json]
-                                 Finds people to email; 1 credit per new lead with an email, free if none. Exit 2 if none
+                                 Finds people to email; 1 credit per new lead found on the web, free if none. Exit 2 if none
   stormgtm leads [--chat <chat-id>] [--json]
   stormgtm qualify-leads <lead-id...> [--deep] [--json]
+  stormgtm add-leads <file.csv | email...> [--json]
+                                 Adds your own leads, free. CSV with an email column, plus name, title, company, notes
+  stormgtm leadsforge [connect | disconnect] [--json]
+                                 Radar also searches your Leadsforge database; leads found there are free. connect asks for the key
 
-Sending (beta)
-  stormgtm send --from "Ada <ada@mail.example.com>" --to <email> --subject <text> (--text <body> | --html-file <file>) [--key <idempotency-key>] [--json]
+Mailboxes (beta)
+  stormgtm mailboxes [--json]    Connected mailboxes with status and daily cap
+  stormgtm mailbox-test <mailbox-id> [--json]
+                                 Signs in to the mailbox's SMTP and IMAP servers; nothing is sent
+  stormgtm mailbox-domains [--json]
+                                 Sending domains with their unsubscribe host and whether it is verified
+
+Sending (from your connected mailboxes)
+  Emails go out from your own mailboxes; set each domain's unsubscribe host first (see mailbox-domains).
+  stormgtm send (--mailbox <mailbox-id> | --from <mailbox address>) --to <email> --subject <text> (--text <body> | --html-file <file>) [--key <idempotency-key>] [--json]
   stormgtm domains [--json]
   stormgtm domain-health <domain-id> [--json]
   stormgtm emails [--json]
@@ -146,9 +158,20 @@ export function parseCsv(text: string): Array<{ email: string; context?: LeadCon
     .filter((lead) => lead.email);
 }
 
+export function mailboxLine(mailbox: Mailbox): string {
+  const state = mailbox.status === "error" ? `error (${mailbox.lastError ?? "test failed"})` : mailbox.status;
+  return `${mailbox.id}  ${mailbox.address}  ${state}  ${mailbox.caps.sentToday}/${mailbox.caps.dailyCap} today`;
+}
+
+export function mailboxDomainLine(domain: MailboxDomain): string {
+  const host = domain.unsubscribeHost ?? "not set";
+  const state = !domain.unsubscribeHost ? "" : domain.verified ? "  verified" : "  waiting for DNS";
+  return `${domain.domain}  ${host}${state}`;
+}
+
 const OUTCOME_KINDS: OutcomeKind[] = ["delivered", "bounced", "replied", "opened", "complained"];
 
-const KNOWN_COMMANDS = new Set(["me", "check", "batch", "batch-status", "outcome", "send", "domains", "domain-health", "emails", "sequences", "sequence", "enroll", "inbox", "thread", "reply", "read", "unread", "archive", "unarchive", "spam", "unspam", "counts", "radar", "leads", "qualify-leads"]);
+const KNOWN_COMMANDS = new Set(["me", "mailboxes", "mailbox-test", "mailbox-domains", "check", "batch", "batch-status", "outcome", "send", "domains", "domain-health", "emails", "sequences", "sequence", "enroll", "inbox", "thread", "reply", "read", "unread", "archive", "unarchive", "spam", "unspam", "counts", "radar", "leads", "qualify-leads", "add-leads", "leadsforge"]);
 
 export async function main(argv: string[], io: InboxIo = processIo): Promise<number> {
   const [command, ...args] = argv;
@@ -181,6 +204,8 @@ export async function main(argv: string[], io: InboxIo = processIo): Promise<num
   if (command === "radar") return cmdRadar(args, client);
   if (command === "leads") return cmdLeads(args, client);
   if (command === "qualify-leads") return cmdQualifyLeads(args, client);
+  if (command === "add-leads") return cmdAddLeads(args, client, (file) => parseCsv(readFileSync(file, "utf8")).map(({ email, context }) => ({ email, name: context?.name, title: context?.title, company: context?.company, note: context?.notes })));
+  if (command === "leadsforge") return cmdLeadsforge(args, client);
 
   if (command === "me") {
     const me = await client().me();
@@ -232,18 +257,40 @@ export async function main(argv: string[], io: InboxIo = processIo): Promise<num
   }
   if (command === "send") {
     const from = flag(args, "from");
+    const mailboxId = flag(args, "mailbox");
     const to = flag(args, "to");
     const subject = flag(args, "subject");
     const text = flag(args, "text");
     const htmlFile = flag(args, "html-file");
-    if (!from || !to || !subject || (!text && !htmlFile)) throw usageError("stormgtm send --from <sender> --to <email> --subject <text> (--text <body> | --html-file <file>)");
-    const result = await client().send({ from, to, subject, text, html: htmlFile ? readFileSync(htmlFile, "utf8") : undefined, idempotencyKey: flag(args, "key") });
+    if ((!from && !mailboxId) || !to || !subject || (!text && !htmlFile)) throw usageError("stormgtm send (--mailbox <mailbox-id> | --from <mailbox address>) --to <email> --subject <text> (--text <body> | --html-file <file>)");
+    const result = await client().send({ mailboxId, from, to, subject, text, html: htmlFile ? readFileSync(htmlFile, "utf8") : undefined, idempotencyKey: flag(args, "key") });
     if (json) console.log(JSON.stringify(result, null, 2));
     else {
       for (const entry of result.accepted) console.log(`queued ${entry.id} → ${entry.to}`);
       for (const entry of result.rejected) console.log(`rejected: ${entry.code} — ${entry.message}`);
     }
     return result.accepted.length > 0 ? EXIT.ok : EXIT.rejected;
+  }
+  if (command === "mailboxes") {
+    const mailboxes = await client().listMailboxes();
+    if (json) console.log(JSON.stringify(mailboxes, null, 2));
+    else if (mailboxes.length === 0) console.log("No mailboxes yet. Connect one at /app/mailboxes.");
+    else for (const mailbox of mailboxes) console.log(mailboxLine(mailbox));
+    return EXIT.ok;
+  }
+  if (command === "mailbox-test") {
+    const id = args[0];
+    if (!id || id.startsWith("--")) throw usageError("stormgtm mailbox-test <mailbox-id>");
+    const mailbox = await client().testMailbox(id);
+    console.log(json ? JSON.stringify(mailbox, null, 2) : `${mailbox.address}: connection works`);
+    return EXIT.ok;
+  }
+  if (command === "mailbox-domains") {
+    const domains = await client().mailboxDomains();
+    if (json) console.log(JSON.stringify(domains, null, 2));
+    else if (domains.length === 0) console.log("No sending domains yet. Connect a mailbox at /app/mailboxes.");
+    else for (const domain of domains) console.log(mailboxDomainLine(domain));
+    return EXIT.ok;
   }
   if (command === "domains") {
     const domains = await client().domains();

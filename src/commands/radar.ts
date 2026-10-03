@@ -1,9 +1,12 @@
 import { EXIT, usageError } from "../errors.js";
-import type { RadarEvent, RadarLead, StormGTM, Tier } from "../index.js";
+import { readSecretLine } from "../secret-input.js";
+import type { AddLeadInput, LeadsforgeStatus, RadarEvent, RadarLead, StormGTM, Tier } from "../index.js";
 
 export const RADAR_USAGE = 'stormgtm radar "<website or description>" [--chat <chat-id>] [--json]';
 export const LEADS_USAGE = "stormgtm leads [--chat <chat-id>] [--json]";
 export const QUALIFY_LEADS_USAGE = "stormgtm qualify-leads <lead-id...> [--deep] [--json]";
+export const ADD_LEADS_USAGE = "stormgtm add-leads <file.csv | email...> [--json]";
+export const LEADSFORGE_USAGE = "stormgtm leadsforge [connect | disconnect] [--json]";
 
 const VALUE_FLAGS = new Set(["--chat"]);
 
@@ -16,6 +19,9 @@ export const consoleRadarIo: RadarIo = {
   out: (line) => console.log(line),
   progress: (line) => console.error(line),
 };
+
+export type ReadLeadsCsv = (file: string) => AddLeadInput[];
+export type ReadSecret = (prompt: string) => Promise<string>;
 
 function flag(args: string[], name: string): string | undefined {
   const index = args.indexOf(`--${name}`);
@@ -73,7 +79,56 @@ export async function cmdLeads(args: string[], client: () => StormGTM, io: Radar
   const leads = await client().radarLeads({ chatId });
   if (args.includes("--json")) io.out(JSON.stringify(leads, null, 2));
   else if (leads.length === 0) io.out("No leads yet. Find some with: stormgtm radar <website>");
-  else for (const lead of leads) io.out(`${lead.id}  ${leadLine(lead)}${lead.verdict ? `  [${lead.verdict}]` : ""}`);
+  else for (const lead of leads) io.out(`${lead.id}  ${leadLine(lead)}${lead.verdict ? `  [${lead.verdict}]` : ""}${originLabel(lead)}`);
+  return EXIT.ok;
+}
+
+const ORIGIN_LABELS: Record<RadarLead["origin"], string> = { web: "", leadsforge: "  (Leadsforge)", manual: "  (added)" };
+
+export function originLabel(lead: Pick<RadarLead, "origin">): string {
+  return ORIGIN_LABELS[lead.origin] ?? "";
+}
+
+export async function cmdAddLeads(args: string[], client: () => StormGTM, readCsv: ReadLeadsCsv, io: RadarIo = consoleRadarIo): Promise<number> {
+  const values = positionals(args);
+  if (values.length === 0) throw usageError(ADD_LEADS_USAGE);
+  const leads = values.length === 1 && /\.csv$/i.test(values[0]!) ? readCsv(values[0]!) : values.map((email) => ({ email }));
+  if (leads.length === 0) throw usageError(`No leads in ${values[0]}. ${ADD_LEADS_USAGE}`);
+  const result = await client().addRadarLeads(leads);
+  if (args.includes("--json")) io.out(JSON.stringify(result, null, 2));
+  else {
+    for (const lead of result.leads) io.out(`${lead.id}  ${leadLine(lead)}`);
+    for (const entry of result.rejected) io.progress(`Skipped ${leads[entry.index]?.email ?? `row ${entry.index + 1}`}: ${entry.message}`);
+    if (result.duplicates.length) io.progress(`${result.duplicates.length} already in your leads`);
+    io.progress(`${result.leads.length} lead${result.leads.length === 1 ? "" : "s"} added, free. Qualify them with: stormgtm qualify-leads <lead-id...>`);
+  }
+  return result.leads.length > 0 || result.duplicates.length > 0 ? EXIT.ok : EXIT.rejected;
+}
+
+function leadsforgeLine(status: LeadsforgeStatus): string {
+  if (!status.connected) return "Leadsforge is not connected. Connect it with: stormgtm leadsforge connect";
+  const credits = status.credits === undefined ? "" : `, ${status.credits} Leadsforge credits`;
+  return `Leadsforge connected (key ${status.keyHint ?? "saved"}${credits}). Radar also searches the Leadsforge people database; leads found there are free.`;
+}
+
+export async function cmdLeadsforge(args: string[], client: () => StormGTM, io: RadarIo = consoleRadarIo, readSecret: ReadSecret = readSecretLine): Promise<number> {
+  const [action] = positionals(args);
+  const json = args.includes("--json");
+  if (action !== undefined && action !== "connect" && action !== "disconnect") throw usageError(LEADSFORGE_USAGE);
+  if (action === "disconnect") {
+    await client().disconnectLeadsforge();
+    io.out(json ? JSON.stringify({ connected: false }, null, 2) : "Leadsforge disconnected.");
+    return EXIT.ok;
+  }
+  if (action === "connect") {
+    const apiKey = (await readSecret("Paste your Leadsforge API key (Leadsforge → Usage → API & MCP): ")).trim();
+    if (!apiKey) throw usageError(`No key entered. ${LEADSFORGE_USAGE}`);
+    const status = await client().connectLeadsforge(apiKey);
+    io.out(json ? JSON.stringify(status, null, 2) : leadsforgeLine(status));
+    return EXIT.ok;
+  }
+  const status = await client().leadsforge();
+  io.out(json ? JSON.stringify(status, null, 2) : leadsforgeLine(status));
   return EXIT.ok;
 }
 

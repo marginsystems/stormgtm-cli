@@ -141,7 +141,8 @@ export interface ResendConnection {
 }
 
 export interface OutgoingEmail {
-  from: string;
+  mailboxId?: string;
+  from?: string;
   to: string;
   subject: string;
   html?: string;
@@ -186,6 +187,7 @@ export interface SequenceStepInput {
 export interface Sequence {
   id: string;
   name: string;
+  mailboxId: string | null;
   from: string;
   replyTo: string | null;
   archivedAt: string | null;
@@ -341,9 +343,34 @@ export interface RadarLead {
   companyHost: string | null;
   sourceUrl: string;
   note: string | null;
+  origin: RadarLeadOrigin;
   verdict: Verdict | null;
   checkId: string | null;
   createdAt: string;
+}
+
+export type RadarLeadOrigin = "web" | "leadsforge" | "manual";
+
+export interface AddLeadInput {
+  email: string;
+  name?: string;
+  title?: string;
+  company?: string;
+  note?: string;
+}
+
+export interface AddLeadsResult {
+  leads: RadarLead[];
+  duplicates: string[];
+  rejected: Array<{ index: number; code: string; message: string }>;
+}
+
+export interface LeadsforgeStatus {
+  connected: boolean;
+  keyHint?: string;
+  connectedAt?: string;
+  updatedAt?: string;
+  credits?: number;
 }
 
 export type RadarEvent =
@@ -373,6 +400,77 @@ export interface FindLeadsResult {
 }
 
 export const FIND_LEADS_TIMEOUT_MS = 5 * 60_000;
+
+export type MailboxStatus = "active" | "error" | "paused";
+export type MailboxProvider = "google" | "microsoft" | "mailforge" | "infraforge" | "other";
+
+export interface MailboxServer {
+  host: string;
+  port: number;
+  security: "ssl" | "starttls";
+  username: string;
+}
+
+export interface MailboxCaps {
+  warmupStep: number;
+  maxStep: number;
+  dailyCap: number;
+  dailyCapOverride: number | null;
+  gapMinutes: number;
+  sentToday: number;
+}
+
+export interface Mailbox {
+  id: string;
+  address: string;
+  displayName: string | null;
+  domain: string;
+  kind: "smtp";
+  status: MailboxStatus;
+  smtp: MailboxServer;
+  imap: MailboxServer;
+  lastTestAt: string | null;
+  lastError: string | null;
+  pausedAt: string | null;
+  pausedReason: string | null;
+  signature: string | null;
+  caps: MailboxCaps;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MailboxServerInput {
+  host?: string;
+  port?: number;
+  security?: "ssl" | "starttls";
+  username?: string;
+  password?: string;
+}
+
+export interface ConnectMailboxInput {
+  address: string;
+  displayName?: string;
+  provider?: MailboxProvider;
+  smtp: MailboxServerInput & { password: string };
+  imap?: MailboxServerInput;
+}
+
+export type MailboxImportRow = { index: number; address: string; ok: true; mailbox: Mailbox } | { index: number; address: string; ok: false; code: string; message: string };
+
+export interface MailboxImportResult {
+  connected: number;
+  failed: number;
+  results: MailboxImportRow[];
+}
+
+export interface MailboxDomain {
+  domain: string;
+  mailboxes: number;
+  unsubscribeHost: string | null;
+  verified: boolean;
+  verifiedAt: string | null;
+  record: { type: string; name: string; value: string } | null;
+}
 
 export interface ClientOptions {
   apiKey: string;
@@ -451,10 +549,6 @@ export class StormGTM {
     return this.request("GET", "/v1/send/resend");
   }
 
-  connectResend(apiKey: string): Promise<ResendConnection & { domains: SendDomain[] }> {
-    return this.request("PUT", "/v1/send/resend", { apiKey });
-  }
-
   disconnectResend(): Promise<{ connected: false; removed: boolean }> {
     return this.request("DELETE", "/v1/send/resend");
   }
@@ -499,11 +593,43 @@ export class StormGTM {
     return (await this.request<{ suppressions: Array<{ address: string; reason: string; createdAt: string }> }>("GET", `/v1/send/suppressions?limit=${limit}`)).suppressions;
   }
 
+  async listMailboxes(): Promise<Mailbox[]> {
+    return (await this.request<{ mailboxes: Mailbox[] }>("GET", "/v1/mailboxes")).mailboxes;
+  }
+
+  mailbox(id: string): Promise<Mailbox> {
+    return this.request("GET", `/v1/mailboxes/${encodeURIComponent(id)}`);
+  }
+
+  connectMailbox(input: ConnectMailboxInput): Promise<Mailbox> {
+    return this.request("POST", "/v1/mailboxes", input);
+  }
+
+  importMailboxes(csv: string, provider?: MailboxProvider): Promise<MailboxImportResult> {
+    return this.request("POST", "/v1/mailboxes/import", provider ? { csv, provider } : { csv });
+  }
+
+  testMailbox(id: string): Promise<Mailbox> {
+    return this.request("POST", `/v1/mailboxes/${encodeURIComponent(id)}/test`);
+  }
+
+  async mailboxDomains(): Promise<MailboxDomain[]> {
+    return (await this.request<{ domains: MailboxDomain[] }>("GET", "/v1/mailboxes/domains")).domains;
+  }
+
+  setUnsubscribeHost(domain: string, host: string | null): Promise<MailboxDomain> {
+    return this.request("PUT", `/v1/mailboxes/domains/${encodeURIComponent(domain)}/unsubscribe-host`, { host });
+  }
+
+  verifyUnsubscribeHost(domain: string): Promise<MailboxDomain> {
+    return this.request("POST", `/v1/mailboxes/domains/${encodeURIComponent(domain)}/unsubscribe-host/verify`);
+  }
+
   async sendWindow(): Promise<SendWindow | null> {
     return (await this.request<{ sendWindow: SendWindow | null }>("GET", "/v1/send/settings")).sendWindow;
   }
 
-  createSequence(input: { name: string; from: string; replyTo?: string; steps: SequenceStepInput[] }): Promise<Sequence> {
+  createSequence(input: { name: string; mailboxId?: string; from?: string; replyTo?: string; steps: SequenceStepInput[] }): Promise<Sequence> {
     return this.request("POST", "/v1/send/sequences", input);
   }
 
@@ -587,6 +713,22 @@ export class StormGTM {
     return (await this.request<{ leads: RadarLead[] }>("GET", `/v1/radar/leads${search}`)).leads;
   }
 
+  addRadarLeads(leads: AddLeadInput[]): Promise<AddLeadsResult> {
+    return this.request("POST", "/v1/radar/leads", { leads });
+  }
+
+  async leadsforge(): Promise<LeadsforgeStatus> {
+    return (await this.request<{ leadsforge: LeadsforgeStatus }>("GET", "/v1/radar/leadsforge")).leadsforge;
+  }
+
+  async connectLeadsforge(apiKey: string): Promise<LeadsforgeStatus> {
+    return (await this.request<{ leadsforge: LeadsforgeStatus }>("PUT", "/v1/radar/leadsforge", { apiKey })).leadsforge;
+  }
+
+  async disconnectLeadsforge(): Promise<void> {
+    await this.request("DELETE", "/v1/radar/leadsforge");
+  }
+
   qualifyRadarLeads(ids: string[], tier?: Tier): Promise<{ leads: RadarLead[]; remaining: number }> {
     return this.request("POST", "/v1/radar/leads/qualify", tier ? { ids, tier } : { ids });
   }
@@ -658,7 +800,7 @@ function apiFailure(status: number, data: unknown): StormGTMError {
 }
 
 function acceptsRejections(path: string, data: unknown): boolean {
-  const rejectable = path === "/v1/send/emails" || /^\/v1\/send\/sequences\/[^/]+\/enrollments$/.test(path);
+  const rejectable = path === "/v1/send/emails" || path === "/v1/radar/leads" || /^\/v1\/send\/sequences\/[^/]+\/enrollments$/.test(path);
   return rejectable && Array.isArray((data as { rejected?: unknown } | null)?.rejected);
 }
 

@@ -1,5 +1,5 @@
 import { createInterface } from "node:readline/promises";
-import { stdin as input, stdout as output } from "node:process";
+import { stdin as input, stderr as output } from "node:process";
 
 export async function readSecretLine(prompt: string): Promise<string> {
   if (!input.isTTY || typeof input.setRawMode !== "function") {
@@ -11,10 +11,10 @@ export async function readSecretLine(prompt: string): Promise<string> {
     }
   }
 
-  output.write(prompt);
   const wasRaw = input.isRaw;
   input.setRawMode(true);
   input.resume();
+  output.write(prompt);
 
   return await new Promise<string>((resolve, reject) => {
     const chars: string[] = [];

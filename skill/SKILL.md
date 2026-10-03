@@ -9,7 +9,7 @@ Use this skill to qualify leads with Barometer before you send anything, then se
 
 ## When to use
 
-Any time you are about to email an address you did not get from a verified source: cold outreach, a scraped or enriched list, a CSV import, a lead an agent found. Also when the user says check, verify, qualify, or "will this email land", or asks to send through their connected domains. Also when the user asks for leads, prospects or people to email for a website or an ideal customer.
+Any time you are about to email an address you did not get from a verified source: cold outreach, a scraped or enriched list, a CSV import, a lead an agent found. Also when the user says check, verify, qualify, or "will this email land", or asks to send from their connected mailboxes. Also when the user asks for leads, prospects or people to email for a website or an ideal customer.
 
 Not for newsletters to opted-in subscribers or transactional mail.
 
@@ -62,7 +62,9 @@ stormgtm login
 
 Radar (beta) finds people to email from a website URL or a description of the ideal customer.
 
-1. Call `find_leads` with the URL or description (CLI: `stormgtm radar "acme.io"`). It can take a minute or two. Each new lead with an email costs 1 credit; searches that find nobody are free. Pass the returned `chatId` to refine the same search.
+1. Call `find_leads` with the URL or description (CLI: `stormgtm radar "acme.io"`). It can take a minute or two. Each new lead found on the web costs 1 credit; searches that find nobody are free. Pass the returned `chatId` to refine the same search.
+   - If the user has Leadsforge, connect it once with `connect_leadsforge` (CLI: `stormgtm leadsforge connect`). `find_leads` then also searches the Leadsforge people database by role, company and tech stack, and those leads are free in StormGTM.
+   - Leads the user already has go in with `add_leads` (CLI: `stormgtm add-leads leads.csv`), free.
 2. Radar leads are not checked yet. Qualify them with `qualify_radar_leads` (CLI: `stormgtm qualify-leads <lead-id...>`), or with `check_lead` when you have more context.
 3. Send only to leads that come back `deliverable`, following the workflow below. `list_radar_leads` (CLI: `stormgtm leads`) shows leads found earlier with their verdicts.
 
@@ -83,7 +85,7 @@ Radar (beta) finds people to email from a website URL or a description of the id
 
 A sequence sends a series of follow-up emails per lead and stops by itself when the lead replies, unsubscribes, bounces or complains.
 
-1. Create it once per campaign with `create_sequence`: a name, a sender on a verified domain with receiving turned on so replies are caught, and up to 10 steps, each with `delayHours`, a subject and a body. Use `{{firstName}}`-style placeholders. The result lists the variables each lead needs.
+1. Create it once per campaign with `create_sequence`: a name, a sender on one of the user's connected mailboxes so replies are caught, and up to 10 steps, each with `delayHours`, a subject and a body. Use `{{firstName}}`-style placeholders. The result lists the variables each lead needs.
 2. Enroll only leads that passed a check with `enroll_leads`, giving every variable the sequence needs. Enrolling the same lead twice does nothing. CLI: `stormgtm enroll <sequence-id> leads.csv`, where the `email` column is the address and the other columns are variables.
 3. Follow progress with `sequence_status` (CLI: `stormgtm sequences`, `stormgtm sequence <sequence-id>`). Stop one lead with `stop_enrollment`.
 

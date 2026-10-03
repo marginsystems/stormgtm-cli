@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { main, USAGE } from "./cli.js";
-import { leadLine, LEADS_USAGE, QUALIFY_LEADS_USAGE, RADAR_USAGE } from "./commands/radar.js";
+import { ADD_LEADS_USAGE, cmdAddLeads, cmdLeads, cmdLeadsforge, leadLine, LEADS_USAGE, LEADSFORGE_USAGE, QUALIFY_LEADS_USAGE, RADAR_USAGE, type RadarIo } from "./commands/radar.js";
 import { describeError, EXIT, StormGTM, StormGTMError, type RadarEvent, type RadarLead } from "./index.js";
 
 function radarLead(overrides: Partial<RadarLead> = {}): RadarLead {
@@ -15,6 +15,7 @@ function radarLead(overrides: Partial<RadarLead> = {}): RadarLead {
     companyHost: "acme.io",
     sourceUrl: "https://acme.io/team",
     note: null,
+    origin: "web",
     verdict: null,
     checkId: null,
     createdAt: "2026-10-02T00:00:00.000Z",
@@ -163,8 +164,16 @@ test("createRadarChat sends a name only when given", async () => {
 });
 
 test("help lists the Radar commands under their own group", () => {
-  const group = USAGE.slice(USAGE.indexOf("Radar (beta)"), USAGE.indexOf("Sending (beta)"));
-  for (const usage of [RADAR_USAGE, LEADS_USAGE, QUALIFY_LEADS_USAGE]) assert.ok(group.includes(usage), usage);
+  const group = USAGE.slice(USAGE.indexOf("Radar (beta)"), USAGE.indexOf("Sending (from your connected mailboxes)"));
+  for (const usage of [RADAR_USAGE, LEADS_USAGE, QUALIFY_LEADS_USAGE, ADD_LEADS_USAGE, LEADSFORGE_USAGE]) assert.ok(group.includes(usage), usage);
+});
+
+test("help says sends go out from connected mailboxes", () => {
+  const group = USAGE.slice(USAGE.indexOf("Sending (from your connected mailboxes)"), USAGE.indexOf("Inbox (beta)"));
+  assert.match(group, /Emails go out from your own mailboxes/);
+  assert.match(group, /stormgtm send \(--mailbox <mailbox-id> \| --from <mailbox address>\)/);
+  assert.doesNotMatch(USAGE, /coming soon|Resend/);
+  assert.match(USAGE, /stormgtm mailbox-domains/);
 });
 
 test("leadLine skips missing details", () => {
@@ -253,4 +262,62 @@ test("stormgtm leads and qualify-leads list and check saved leads", async () => 
 
   const usage = await runCli(["qualify-leads"], () => new Response("{}")).catch((caught: unknown) => caught);
   assert.equal(describeError(usage).exitCode, EXIT.usage);
+});
+
+function capture(): RadarIo & { lines: string[]; progressLines: string[] } {
+  const lines: string[] = [];
+  const progressLines: string[] = [];
+  return { lines, progressLines, out: (line) => void lines.push(line), progress: (line) => void progressLines.push(line) };
+}
+
+test("add-leads sends emails or CSV rows, reports skips, and accepts a 422 with rejections", async () => {
+  const { client: api, calls } = client((call) => {
+    const leads = (call.body as { leads: Array<{ email: string }> }).leads;
+    if (leads.every((lead) => !lead.email.includes("@"))) return new Response(JSON.stringify({ leads: [], duplicates: [], rejected: [{ index: 0, code: "invalid_email", message: "Not a valid email address" }] }), { status: 422 });
+    return new Response(JSON.stringify({ leads: [radarLead({ origin: "manual" })], duplicates: ["bo@acme.io"], rejected: [{ index: 2, code: "invalid_email", message: "Not a valid email address" }] }), { status: 201 });
+  });
+  const io = capture();
+  assert.equal(await cmdAddLeads(["jane@acme.io", "bo@acme.io", "nope"], () => api, () => [], io), EXIT.ok);
+  assert.deepEqual(calls[0]!.body, { leads: [{ email: "jane@acme.io" }, { email: "bo@acme.io" }, { email: "nope" }] });
+  assert.deepEqual(io.lines, ["rld_1  jane@acme.io  Jane Doe · CTO · Acme"]);
+  assert.deepEqual(io.progressLines, ["Skipped nope: Not a valid email address", "1 already in your leads", "1 lead added, free. Qualify them with: stormgtm qualify-leads <lead-id...>"]);
+
+  const read: string[] = [];
+  await cmdAddLeads(["leads.csv", "--json"], () => api, (file) => (read.push(file), [{ email: "jane@acme.io", name: "Jane Doe", company: "Acme" }]), capture());
+  assert.deepEqual(read, ["leads.csv"]);
+  assert.deepEqual(calls[1]!.body, { leads: [{ email: "jane@acme.io", name: "Jane Doe", company: "Acme" }] });
+
+  assert.equal(await cmdAddLeads(["nope"], () => api, () => [], capture()), EXIT.rejected);
+  await assert.rejects(cmdAddLeads([], () => api, () => [], capture()), /add-leads/);
+  await assert.rejects(cmdAddLeads(["empty.csv"], () => api, () => [], capture()), /No leads in empty\.csv/);
+});
+
+test("leads marks where each lead came from", async () => {
+  const { client: api } = client(() => new Response(JSON.stringify({ leads: [radarLead(), radarLead({ id: "rld_2", email: "cto@initech.io", origin: "leadsforge", name: null, title: null, company: null }), radarLead({ id: "rld_3", email: "me@acme.io", origin: "manual", name: null, title: null, company: null })] })));
+  const io = capture();
+  await cmdLeads([], () => api, io);
+  assert.deepEqual(io.lines, ["rld_1  jane@acme.io  Jane Doe · CTO · Acme", "rld_2  cto@initech.io  (Leadsforge)", "rld_3  me@acme.io  (added)"]);
+});
+
+test("leadsforge shows status, connects with a pasted key, and disconnects", async () => {
+  const { client: api, calls } = client((call) => {
+    if (call.method === "GET") return new Response(JSON.stringify({ leadsforge: { connected: false } }));
+    if (call.method === "PUT") return new Response(JSON.stringify({ leadsforge: { connected: true, keyHint: "…1234", credits: 100 } }));
+    return new Response(JSON.stringify({ ok: true }));
+  });
+  const io = capture();
+  await cmdLeadsforge([], () => api, io);
+  const prompts: string[] = [];
+  await cmdLeadsforge(["connect"], () => api, io, async (prompt) => (prompts.push(prompt), "  lf_live_key_1234 "));
+  await cmdLeadsforge(["disconnect"], () => api, io);
+  assert.deepEqual(io.lines, [
+    "Leadsforge is not connected. Connect it with: stormgtm leadsforge connect",
+    "Leadsforge connected (key …1234, 100 Leadsforge credits). Radar also searches the Leadsforge people database; leads found there are free.",
+    "Leadsforge disconnected.",
+  ]);
+  assert.match(prompts[0]!, /Leadsforge API key/);
+  assert.deepEqual(calls.map((call) => `${call.method} ${call.url.replace("https://api.test", "")}`), ["GET /v1/radar/leadsforge", "PUT /v1/radar/leadsforge", "DELETE /v1/radar/leadsforge"]);
+  assert.deepEqual(calls[1]!.body, { apiKey: "lf_live_key_1234" });
+  await assert.rejects(cmdLeadsforge(["connect"], () => api, io, async () => ""), /No key entered/);
+  await assert.rejects(cmdLeadsforge(["status"], () => api, io), /leadsforge \[connect/);
 });

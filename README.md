@@ -1,6 +1,6 @@
 # stormgtm
 
-CLI and typed client for [StormGTM](https://stormgtm.com). Barometer reviews an email lead before you send: give it an address plus whatever you know about the person, and get a verdict (`deliverable`, `risky`, `undeliverable`, `unknown`), a 0-100 score and plain-language reasons. Send (beta) emails the leads that pass, through your own Resend account and domains.
+CLI and typed client for [StormGTM](https://stormgtm.com). Barometer reviews an email lead before you send: give it an address plus whatever you know about the person, and get a verdict (`deliverable`, `risky`, `undeliverable`, `unknown`), a 0-100 score and plain-language reasons. Send the leads that pass from your own connected mailboxes.
 
 Requires **Node.js 22+**.
 
@@ -48,7 +48,11 @@ stormgtm check jane@acme.io --deep --json
 stormgtm batch leads.csv --wait
 stormgtm batch-status <batch-id>
 stormgtm outcome jane@acme.io bounced
-stormgtm send --from "Ada <ada@mail.acme.io>" --to jane@acme.io --subject "Hello" --text "Hi Jane"
+stormgtm send --mailbox <mailbox-id> --to jane@acme.io --subject "Hello" --text "Hi Jane"
+stormgtm send --from ada@mail.acme.io --to jane@acme.io --subject "Hello" --text "Hi Jane"
+stormgtm mailboxes
+stormgtm mailbox-test <mailbox-id>
+stormgtm mailbox-domains
 stormgtm domains
 stormgtm domain-health <domain-id>
 stormgtm emails
@@ -77,9 +81,13 @@ stormgtm radar acme.io                       # progress on stderr, one lead per 
 stormgtm radar "CTOs at seed-stage dev tools startups" --chat <chat-id> --json
 stormgtm leads [--chat <chat-id>]            # leads Radar saved, with verdicts once qualified
 stormgtm qualify-leads <lead-id> <lead-id> [--deep]
+stormgtm add-leads leads.csv                 # your own leads, free; CSV with email plus name, title, company, notes
+stormgtm leadsforge connect                  # paste a Leadsforge API key; Radar then also searches Leadsforge
 ```
 
-`radar` costs 1 credit per new lead with an email; searches that find nobody are free, and it exits 2 when it finds nobody. A search can take a minute or two. Qualify the leads before you send to them.
+`radar` costs 1 credit per new lead found on the web. Leads from a connected Leadsforge account, leads you add with `add-leads`, and searches that find nobody are free. `radar` exits 2 when it finds nobody. A search can take a minute or two. Qualify the leads before you send to them.
+
+`send` goes out from a connected mailbox: pass `--mailbox <id>`, or `--from` with the mailbox address. Set each domain's unsubscribe host in the dashboard first; `mailbox-domains` shows where each one stands.
 
 `reply` answers an existing thread only, goes to the thread's participant and costs 1 credit. In a terminal it asks before sending; pass `--yes` to skip the question.
 

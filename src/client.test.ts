@@ -44,6 +44,11 @@ test("clientFromEnv requires a key", () => {
   assert.ok(clientFromEnv({ STORMGTM_API_KEY: "sgtm_live_x" }) instanceof StormGTM);
 });
 
+test("client does not expose the deprecated Resend connection method", () => {
+  const client = new StormGTM({ apiKey: "k" });
+  assert.equal("connectResend" in client, false);
+});
+
 test("summarize puts fatal reasons first", () => {
   const text = summarize({
     email: "noreply@acme.io",
