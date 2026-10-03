@@ -36,8 +36,9 @@ Leads
 Radar (beta)
   stormgtm radar "<website or description>" [--chat <chat-id>] [--json]
                                  Finds people to email; 1 credit per new lead found on the web, free if none. Exit 2 if none
-  stormgtm leads [--chat <chat-id>] [--json | --csv]
+  stormgtm leads [--chat <chat-id>] [--after <cursor>] [--limit <n>] [--json | --csv]
                                  Saved leads. --csv prints a spreadsheet-ready CSV to stdout, free
+                                 --after 0 starts an oldest-first page; pass nextAfter until no leads return, then keep it for next time
   stormgtm qualify-leads <lead-id...> [--deep] [--json]
   stormgtm add-leads <file.csv | email...> [--json]
                                  Adds your own leads, free. CSV with an email column, plus name, title, company, notes

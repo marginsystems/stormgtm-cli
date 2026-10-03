@@ -1,15 +1,15 @@
 ---
 name: stormgtm-gtm
-description: Find leads with StormGTM Radar, qualify every lead with Barometer before emailing it, send only to deliverable addresses, report outcomes, and use Send and sequences for outreach.
+description: Find leads with StormGTM Radar and take them out to send yourself or through StormGTM, qualify leads with Barometer before emailing them, send only to deliverable addresses, report outcomes, and use Send and sequences for outreach.
 ---
 
 # StormGTM
 
-Use this skill to qualify leads with Barometer before you send anything, then send and follow up through StormGTM. A bounce costs sender reputation; one check costs a credit or less.
+Use this skill to find leads, qualify them with Barometer, and then either send them yourself or send and follow up through StormGTM. Each part works alone: finding, qualifying and taking out leads need no connected mailbox. A bounce costs sender reputation; one check costs a credit or less.
 
 ## When to use
 
-Any time you are about to email an address you did not get from a verified source: cold outreach, a scraped or enriched list, a CSV import, a lead an agent found. Also when the user says check, verify, qualify, or "will this email land", or asks to send from their connected mailboxes. Also when the user asks for leads, prospects or people to email for a website or an ideal customer.
+Any time you are about to email an address you did not get from a verified source: cold outreach, a scraped or enriched list, a CSV import, a lead an agent found. Also when the user says check, verify, qualify, or "will this email land", or asks to send from their connected mailboxes. Also when the user asks for leads, prospects or people to email for a website or an ideal customer, including when they will send the email with their own tools.
 
 Not for newsletters to opted-in subscribers or transactional mail.
 
@@ -56,7 +56,7 @@ stormgtm login
 ## Preconditions
 
 1. Prefer the `stormgtm` MCP server. Call `whoami`. If MCP is missing, require `stormgtm whoami --json` to exit 0. If neither works, stop and print the install commands above.
-2. Call `credits` (or `stormgtm me --json`). If the balance is 0, say so and stop.
+2. Call `credits` (or `stormgtm me --json`). Finding leads on the web, checks and sends cost credits; if the balance is 0, say so before starting any of those. Listing saved leads, adding your own leads and reporting outcomes are free.
 
 ## Find leads with Radar
 
@@ -68,6 +68,16 @@ Radar (beta) finds people to email from a website URL or a description of the id
 2. Radar leads are not checked yet. Qualify them with `qualify_radar_leads` (CLI: `stormgtm qualify-leads <lead-id...>`), or with `check_lead` when you have more context.
 3. Send only to leads that come back `deliverable`, following the workflow below. `list_radar_leads` (CLI: `stormgtm leads`) shows leads found earlier with their verdicts.
 4. To hand the leads to the user as a file, run `stormgtm leads --csv > leads.csv` (add `--chat <chat-id>` for one search). Exporting is free.
+
+## Leads only: take leads out and send them yourself
+
+No mailbox is needed for this. Use it when the user sends with their own tools, or while their StormGTM mailboxes are still warming up.
+
+1. Find leads as above, or let the user find them in the dashboard.
+2. Take only the leads you have not taken yet. Call `list_radar_leads` with `after: "0"` the first time (CLI: `stormgtm leads --after 0 --json`). Leads come back oldest first with a `nextAfter` value. Call again with `after` set to that value until no leads come back, then save the last `nextAfter` where the next run can read it, such as a file in the project. The next run starts from the saved value and gets only leads saved since.
+3. Qualify them with `qualify_radar_leads` and keep the ones that come back `deliverable`. This step is optional when the user sends by their own means, and recommended.
+4. Send however the user sends. That send does not go through StormGTM.
+5. Report what happened with `report_outcome` (CLI: `stormgtm outcome <email> <kind>`): every `bounced`, `complained` and `replied` at least. It is free, works for any address whoever sent the email, and makes later checks of that address and its domain sharper.
 
 ## Workflow
 
@@ -94,11 +104,11 @@ The `stormgtm-send` skill covers replies and domain limits.
 
 ## Rules
 
-- Never email or enroll an address that was not checked in this task.
+- Never email or enroll an address through StormGTM that was not checked in this task. When the user sends leads by their own means, checking first is recommended.
 - Send only on `deliverable` with `policy.allowed` true. `risky` needs more context or a human; `undeliverable` is dropped.
 - `unknown` is free to retry and is never a reason to send.
 - Pass every piece of context you have on every check.
-- Always report outcomes for bounces, complaints and replies.
+- Always report outcomes for bounces, complaints and replies, also for email sent outside StormGTM.
 - Never send from a domain that is not verified, and never try to bypass a paused domain or the daily limit.
 - Do not paste API keys into chat, files or commits. The key lives in `~/.stormgtm/config.json` or `STORMGTM_API_KEY`.
 - Do not retry a failed check in a tight loop; a repeated identical request spends credits.

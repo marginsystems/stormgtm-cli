@@ -727,6 +727,13 @@ export class StormGTM {
     return (await this.request<{ leads: RadarLead[] }>("GET", `/v1/radar/leads${search}`)).leads;
   }
 
+  radarLeadsAfter(query: { after: string; chatId?: string; limit?: number }): Promise<{ leads: RadarLead[]; nextAfter: string }> {
+    const search = new URLSearchParams({ after: query.after });
+    if (query.chatId) search.set("chatId", query.chatId);
+    if (query.limit !== undefined) search.set("limit", String(query.limit));
+    return this.request("GET", `/v1/radar/leads?${search}`);
+  }
+
   addRadarLeads(leads: AddLeadInput[]): Promise<AddLeadsResult> {
     return this.request("POST", "/v1/radar/leads", { leads });
   }

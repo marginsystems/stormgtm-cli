@@ -166,6 +166,8 @@ test("createRadarChat sends a name only when given", async () => {
 test("help lists the Radar commands under their own group", () => {
   const group = USAGE.slice(USAGE.indexOf("Radar (beta)"), USAGE.indexOf("Sending (from your connected mailboxes)"));
   for (const usage of [RADAR_USAGE, LEADS_USAGE, QUALIFY_LEADS_USAGE, ADD_LEADS_USAGE, LEADSFORGE_USAGE]) assert.ok(group.includes(usage), usage);
+  assert.match(group, /pass nextAfter until no leads return/);
+  assert.doesNotMatch(group, /takes every lead/);
 });
 
 test("help says sends go out from connected mailboxes", () => {
@@ -297,6 +299,36 @@ test("leads marks where each lead came from", async () => {
   const io = capture();
   await cmdLeads([], () => api, io);
   assert.deepEqual(io.lines, ["rld_1  jane@acme.io  Jane Doe · CTO · Acme", "rld_2  cto@initech.io  (Leadsforge)", "rld_3  me@acme.io  (added)"]);
+});
+
+test("leads --after takes only new leads and prints the cursor for next time", async () => {
+  const { client: api, calls } = client((call) =>
+    new Response(JSON.stringify(call.url.includes("after=0") ? { leads: [radarLead(), radarLead({ id: "rld_2", email: "bo@acme.io", verdict: "deliverable" })], nextAfter: "2.rld_2" } : { leads: [], nextAfter: "2.rld_2" })),
+  );
+  const io = capture();
+  assert.equal(await cmdLeads(["--after", "0", "--limit", "50", "--chat", "rch_1"], () => api, io), EXIT.ok);
+  assert.equal(calls[0]!.url, "https://api.test/v1/radar/leads?after=0&chatId=rch_1&limit=50");
+  assert.deepEqual(io.lines, ["rld_1  jane@acme.io  Jane Doe · CTO · Acme", "rld_2  bo@acme.io  Jane Doe · CTO · Acme  [deliverable]"]);
+  assert.deepEqual(io.progressLines, ["2 new leads.", "Next time: stormgtm leads --after 2.rld_2"]);
+
+  const idle = capture();
+  await cmdLeads(["--after", "2.rld_2"], () => api, idle);
+  assert.deepEqual(idle.lines, []);
+  assert.deepEqual(idle.progressLines, ["No new leads.", "Next time: stormgtm leads --after 2.rld_2"]);
+
+  const json = capture();
+  await cmdLeads(["--after", "2.rld_2", "--json"], () => api, json);
+  assert.deepEqual(JSON.parse(json.lines[0]!), { leads: [], nextAfter: "2.rld_2" });
+
+  await assert.rejects(cmdLeads(["--after"], () => api, io), /stormgtm leads/);
+  await assert.rejects(cmdLeads(["--limit", "5"], () => api, io), /--limit needs --after/);
+  await assert.rejects(cmdLeads(["--after", "0", "--limit", "0"], () => api, io), /--limit needs --after/);
+  await assert.rejects(cmdLeads(["--after", "0", "--limit", "abc"], () => api, io), /--limit needs --after/);
+
+  const csv = capture();
+  await cmdLeads(["--after", "0", "--csv"], () => api, csv);
+  assert.equal(csv.lines[0]!.split("\r\n").length, 3);
+  assert.deepEqual(csv.progressLines, ["2 new leads.", "Next time: stormgtm leads --after 2.rld_2"]);
 });
 
 test("leads --csv prints a header row and one row per lead, scoped to the chat", async () => {

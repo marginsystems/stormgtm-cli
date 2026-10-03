@@ -81,6 +81,7 @@ stormgtm radar acme.io                       # progress on stderr, one lead per 
 stormgtm radar "CTOs at seed-stage dev tools startups" --chat <chat-id> --json
 stormgtm leads [--chat <chat-id>]            # leads Radar saved, with verdicts once qualified
 stormgtm leads --csv > leads.csv             # the same leads as a CSV file, free
+stormgtm leads --after 0 --json              # only leads after a cursor, oldest first, as { leads, nextAfter }; pass nextAfter next time
 stormgtm qualify-leads <lead-id> <lead-id> [--deep]
 stormgtm add-leads leads.csv                 # your own leads, free; CSV with email plus name, title, company, notes
 stormgtm leadsforge connect                  # paste a Leadsforge API key; Radar then also searches Leadsforge
@@ -156,7 +157,7 @@ const { leads: checked } = await stormgtm.qualifyRadarLeads(leads.map((lead) => 
 const deliverable = checked.filter((lead) => lead.verdict === "deliverable");
 ```
 
-`findLeads` creates a chat unless you pass `chatId`, streams the search and resolves when it finishes. It throws `StormGTMError` on an API error (for example `insufficient_credits`) or when the search fails. `radarChats`, `createRadarChat`, `radarMessages`, `radarLeads`, `deleteRadarLead` and `cancelRadarChat` cover the rest of the Radar API.
+`findLeads` creates a chat unless you pass `chatId`, streams the search and resolves when it finishes. It throws `StormGTMError` on an API error (for example `insufficient_credits`) or when the search fails. `radarChats`, `createRadarChat`, `radarMessages`, `radarLeads`, `radarLeadsAfter` (only leads after a cursor), `deleteRadarLead` and `cancelRadarChat` cover the rest of the Radar API.
 
 ## MCP server
 

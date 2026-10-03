@@ -3,12 +3,12 @@ import { readSecretLine } from "../secret-input.js";
 import type { AddLeadInput, LeadsforgeStatus, RadarEvent, RadarLead, StormGTM, Tier } from "../index.js";
 
 export const RADAR_USAGE = 'stormgtm radar "<website or description>" [--chat <chat-id>] [--json]';
-export const LEADS_USAGE = "stormgtm leads [--chat <chat-id>] [--json | --csv]";
+export const LEADS_USAGE = "stormgtm leads [--chat <chat-id>] [--after <cursor>] [--limit <n>] [--json | --csv]";
 export const QUALIFY_LEADS_USAGE = "stormgtm qualify-leads <lead-id...> [--deep] [--json]";
 export const ADD_LEADS_USAGE = "stormgtm add-leads <file.csv | email...> [--json]";
 export const LEADSFORGE_USAGE = "stormgtm leadsforge [connect | disconnect] [--json]";
 
-const VALUE_FLAGS = new Set(["--chat"]);
+const VALUE_FLAGS = new Set(["--chat", "--after", "--limit"]);
 
 export interface RadarIo {
   out(line: string): void;
@@ -100,12 +100,32 @@ export async function cmdLeads(args: string[], client: () => StormGTM, io: Radar
   const chatId = flag(args, "chat");
   const csv = args.includes("--csv");
   if ((args.includes("--chat") && (!chatId || chatId.startsWith("--"))) || (csv && args.includes("--json"))) throw usageError(LEADS_USAGE);
+  const after = flag(args, "after");
+  const limitOption = flag(args, "limit");
+  const limit = limitOption === undefined ? undefined : Number.parseInt(limitOption, 10);
+  if (args.includes("--after") && (!after || after.startsWith("--"))) throw usageError(LEADS_USAGE);
+  if (args.includes("--limit") && (after === undefined || !limit || limit < 1)) throw usageError(`--limit needs --after and a positive number. ${LEADS_USAGE}`);
+  if (after !== undefined) {
+    const page = await client().radarLeadsAfter({ after, chatId, limit });
+    if (args.includes("--json")) io.out(JSON.stringify(page, null, 2));
+    else {
+      if (csv) io.out(leadsCsv(page.leads).replace(/\r\n$/, ""));
+      else for (const lead of page.leads) io.out(storedLeadLine(lead));
+      io.progress(page.leads.length === 0 ? "No new leads." : `${page.leads.length} new lead${page.leads.length === 1 ? "" : "s"}.`);
+      io.progress(`Next time: stormgtm leads --after ${page.nextAfter}`);
+    }
+    return EXIT.ok;
+  }
   const leads = await client().radarLeads({ chatId });
   if (csv) io.out(leadsCsv(leads).replace(/\r\n$/, ""));
   else if (args.includes("--json")) io.out(JSON.stringify(leads, null, 2));
   else if (leads.length === 0) io.out("No leads yet. Find some with: stormgtm radar <website>");
-  else for (const lead of leads) io.out(`${lead.id}  ${leadLine(lead)}${lead.verdict ? `  [${lead.verdict}]` : ""}${originLabel(lead)}`);
+  else for (const lead of leads) io.out(storedLeadLine(lead));
   return EXIT.ok;
+}
+
+function storedLeadLine(lead: RadarLead): string {
+  return `${lead.id}  ${leadLine(lead)}${lead.verdict ? `  [${lead.verdict}]` : ""}${originLabel(lead)}`;
 }
 
 const ORIGIN_LABELS: Record<RadarLead["origin"], string> = { web: "", leadsforge: "  (Leadsforge)", manual: "  (added)" };
