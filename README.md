@@ -47,7 +47,7 @@ stormgtm check jane@acme.io --name "Jane Doe" --company Acme
 stormgtm check jane@acme.io --deep --json
 stormgtm batch leads.csv --wait
 stormgtm batch-status <batch-id>
-stormgtm outcome jane@acme.io bounced
+stormgtm outcome jane@acme.io bounced --detail "550 no such user"   # free; works for email sent by any means
 stormgtm send --mailbox <mailbox-id> --to jane@acme.io --subject "Hello" --text "Hi Jane"
 stormgtm send --from ada@mail.acme.io --to jane@acme.io --subject "Hello" --text "Hi Jane"
 stormgtm mailboxes
@@ -80,12 +80,15 @@ Radar (beta) finds people to email from a website or a description of your ideal
 stormgtm radar acme.io                       # progress on stderr, one lead per line on stdout, then a summary
 stormgtm radar "CTOs at seed-stage dev tools startups" --chat <chat-id> --json
 stormgtm leads [--chat <chat-id>]            # leads Radar saved, with verdicts once qualified
+stormgtm leads --csv > leads.csv             # the same leads as a CSV file, free
 stormgtm qualify-leads <lead-id> <lead-id> [--deep]
 stormgtm add-leads leads.csv                 # your own leads, free; CSV with email plus name, title, company, notes
 stormgtm leadsforge connect                  # paste a Leadsforge API key; Radar then also searches Leadsforge
 ```
 
 `radar` costs 1 credit per new lead found on the web. Leads from a connected Leadsforge account, leads you add with `add-leads`, and searches that find nobody are free. `radar` exits 2 when it finds nobody. A search can take a minute or two. Qualify the leads before you send to them.
+
+`leads --csv` prints name, email, title, company, company site, source URL, note, verdict and found date. Exporting is free. Cells that start with `=`, `+`, `-` or `@` get a leading `'` so a spreadsheet does not run them as formulas.
 
 `send` goes out from a connected mailbox: pass `--mailbox <id>`, or `--from` with the mailbox address. Set each domain's unsubscribe host in the dashboard first; `mailbox-domains` shows where each one stands.
 

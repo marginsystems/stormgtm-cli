@@ -170,6 +170,44 @@ test("sequence CLI requests the API enrollment limit", async () => {
   }
 });
 
+test("outcome sends the detail and exits 2 when the address is not recorded", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalApiKey = process.env.STORMGTM_API_KEY;
+  const originalApiUrl = process.env.STORMGTM_API_URL;
+  const originalError = console.error;
+  const originalLog = console.log;
+  const bodies: unknown[] = [];
+  const errors: string[] = [];
+  const logs: string[] = [];
+  process.env.STORMGTM_API_KEY = "test-key";
+  process.env.STORMGTM_API_URL = "https://api.test";
+  console.error = (line: string) => void errors.push(line);
+  console.log = (line: string) => void logs.push(line);
+  globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as { email: string };
+    bodies.push(body);
+    const valid = body.email.includes("@");
+    return new Response(JSON.stringify({ recorded: valid ? 1 : 0, rejected: valid ? [] : [{ email: body.email, reason: "invalid_email" }] }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    assert.equal(await main(["outcome", "jane@acme.io", "bounced", "--detail", "550 no such user"]), 0);
+    assert.deepEqual(bodies[0], { email: "jane@acme.io", kind: "bounced", detail: "550 no such user" });
+    assert.deepEqual(logs, ["recorded 1"]);
+    assert.equal(await main(["outcome", "nope", "bounced"]), 2);
+    assert.deepEqual(bodies[1], { email: "nope", kind: "bounced" });
+    assert.deepEqual(errors, ["Not recorded: nope is not a valid email address"]);
+    await assert.rejects(main(["outcome", "jane@acme.io", "bounced", "--detail"]), /stormgtm outcome <email>/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.error = originalError;
+    console.log = originalLog;
+    if (originalApiKey === undefined) delete process.env.STORMGTM_API_KEY;
+    else process.env.STORMGTM_API_KEY = originalApiKey;
+    if (originalApiUrl === undefined) delete process.env.STORMGTM_API_URL;
+    else process.env.STORMGTM_API_URL = originalApiUrl;
+  }
+});
+
 test("inbox calls use the inbox routes with query and body", async () => {
   const { impl, calls } = fakeFetch((url) => ({ status: url.endsWith("/reply") ? 202 : 200, body: url.includes("/threads?") ? { threads: [], nextCursor: null } : { updated: 1 } }));
   const client = new StormGTM({ apiKey: "k", baseUrl: "https://api.test", fetch: impl });

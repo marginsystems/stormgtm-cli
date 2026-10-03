@@ -3,7 +3,7 @@ import { readSecretLine } from "../secret-input.js";
 import type { AddLeadInput, LeadsforgeStatus, RadarEvent, RadarLead, StormGTM, Tier } from "../index.js";
 
 export const RADAR_USAGE = 'stormgtm radar "<website or description>" [--chat <chat-id>] [--json]';
-export const LEADS_USAGE = "stormgtm leads [--chat <chat-id>] [--json]";
+export const LEADS_USAGE = "stormgtm leads [--chat <chat-id>] [--json | --csv]";
 export const QUALIFY_LEADS_USAGE = "stormgtm qualify-leads <lead-id...> [--deep] [--json]";
 export const ADD_LEADS_USAGE = "stormgtm add-leads <file.csv | email...> [--json]";
 export const LEADSFORGE_USAGE = "stormgtm leadsforge [connect | disconnect] [--json]";
@@ -43,6 +43,29 @@ export function leadLine(lead: Pick<RadarLead, "email" | "name" | "title" | "com
   return details ? `${lead.email}  ${details}` : lead.email;
 }
 
+export const LEAD_CSV_COLUMNS = ["name", "email", "title", "company", "company site", "source URL", "note", "verdict", "found date"] as const;
+
+export function csvCell(value: string | null | undefined): string {
+  const text = value ?? "";
+  const guarded = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  return /[",\r\n]|^\s|\s$/.test(guarded) ? `"${guarded.replace(/"/g, '""')}"` : guarded;
+}
+
+export function leadsCsv(leads: RadarLead[]): string {
+  const rows = leads.map((lead) => [
+    lead.name,
+    lead.email,
+    lead.title,
+    lead.company,
+    lead.companyHost,
+    lead.sourceUrl,
+    lead.note,
+    lead.verdict ?? "not checked",
+    lead.createdAt.slice(0, 10),
+  ]);
+  return [LEAD_CSV_COLUMNS, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
+}
+
 export function progressLine(event: RadarEvent): string | null {
   if (event.type !== "tool") return null;
   if (event.phase === "start") return `· ${event.summary}`;
@@ -75,9 +98,11 @@ export async function cmdRadar(args: string[], client: () => StormGTM, io: Radar
 
 export async function cmdLeads(args: string[], client: () => StormGTM, io: RadarIo = consoleRadarIo): Promise<number> {
   const chatId = flag(args, "chat");
-  if (args.includes("--chat") && (!chatId || chatId.startsWith("--"))) throw usageError(LEADS_USAGE);
+  const csv = args.includes("--csv");
+  if ((args.includes("--chat") && (!chatId || chatId.startsWith("--"))) || (csv && args.includes("--json"))) throw usageError(LEADS_USAGE);
   const leads = await client().radarLeads({ chatId });
-  if (args.includes("--json")) io.out(JSON.stringify(leads, null, 2));
+  if (csv) io.out(leadsCsv(leads).replace(/\r\n$/, ""));
+  else if (args.includes("--json")) io.out(JSON.stringify(leads, null, 2));
   else if (leads.length === 0) io.out("No leads yet. Find some with: stormgtm radar <website>");
   else for (const lead of leads) io.out(`${lead.id}  ${leadLine(lead)}${lead.verdict ? `  [${lead.verdict}]` : ""}${originLabel(lead)}`);
   return EXIT.ok;

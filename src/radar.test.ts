@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { main, USAGE } from "./cli.js";
-import { ADD_LEADS_USAGE, cmdAddLeads, cmdLeads, cmdLeadsforge, leadLine, LEADS_USAGE, LEADSFORGE_USAGE, QUALIFY_LEADS_USAGE, RADAR_USAGE, type RadarIo } from "./commands/radar.js";
+import { ADD_LEADS_USAGE, cmdAddLeads, cmdLeads, cmdLeadsforge, csvCell, leadLine, leadsCsv, LEADS_USAGE, LEADSFORGE_USAGE, QUALIFY_LEADS_USAGE, RADAR_USAGE, type RadarIo } from "./commands/radar.js";
 import { describeError, EXIT, StormGTM, StormGTMError, type RadarEvent, type RadarLead } from "./index.js";
 
 function radarLead(overrides: Partial<RadarLead> = {}): RadarLead {
@@ -297,6 +297,50 @@ test("leads marks where each lead came from", async () => {
   const io = capture();
   await cmdLeads([], () => api, io);
   assert.deepEqual(io.lines, ["rld_1  jane@acme.io  Jane Doe · CTO · Acme", "rld_2  cto@initech.io  (Leadsforge)", "rld_3  me@acme.io  (added)"]);
+});
+
+test("leads --csv prints a header row and one row per lead, scoped to the chat", async () => {
+  const { client: api, calls } = client(() => new Response(JSON.stringify({ leads: [radarLead({ note: "Runs platform", verdict: "deliverable", createdAt: "2026-10-02T09:30:00.000Z" }), radarLead({ id: "rld_2", email: "bo@gmail.com", name: null, title: null, company: null, companyHost: null, sourceUrl: "", createdAt: "" })] })));
+  const io = capture();
+  assert.equal(await cmdLeads(["--csv", "--chat", "rch_1"], () => api, io), EXIT.ok);
+  assert.deepEqual(io.lines, [
+    "name,email,title,company,company site,source URL,note,verdict,found date\r\n" +
+      "Jane Doe,jane@acme.io,CTO,Acme,acme.io,https://acme.io/team,Runs platform,deliverable,2026-10-02\r\n" +
+      ",bo@gmail.com,,,,,,not checked,",
+  ]);
+  assert.equal(calls[0]!.url, "https://api.test/v1/radar/leads?chatId=rch_1");
+  assert.equal(calls.length, 1);
+});
+
+test("leads --csv prints only the header when there are no leads, and refuses --json with it", async () => {
+  const { client: api } = client(() => new Response(JSON.stringify({ leads: [] })));
+  const io = capture();
+  await cmdLeads(["--csv"], () => api, io);
+  assert.deepEqual(io.lines, ["name,email,title,company,company site,source URL,note,verdict,found date"]);
+  await assert.rejects(cmdLeads(["--csv", "--json"], () => api, io), /--json \| --csv/);
+});
+
+test("CSV cells quote commas, quotes, newlines and edge spaces, and keep non-ASCII text", () => {
+  assert.equal(csvCell("Acme, Inc."), '"Acme, Inc."');
+  assert.equal(csvCell('Jane "JD" Doe'), '"Jane ""JD"" Doe"');
+  assert.equal(csvCell("line one\nline two"), '"line one\nline two"');
+  assert.equal(csvCell("line one\r\nline two"), '"line one\r\nline two"');
+  assert.equal(csvCell(" padded "), '" padded "');
+  assert.equal(csvCell("Zoë Müller 北京"), "Zoë Müller 北京");
+  assert.equal(csvCell(null), "");
+  const csv = leadsCsv([radarLead({ name: "Søren Åberg", company: "Müller, GmbH", note: 'Said "call me"\nnext week', createdAt: "" })]);
+  assert.equal(csv.split("\r\n")[1], 'Søren Åberg,jane@acme.io,CTO,"Müller, GmbH",acme.io,https://acme.io/team,"Said ""call me""\nnext week",not checked,');
+});
+
+test("CSV cells that a spreadsheet would run as a formula are neutralised", () => {
+  assert.equal(csvCell("=HYPERLINK(\"http://evil.test\")"), '"\'=HYPERLINK(""http://evil.test"")"');
+  assert.equal(csvCell("+1 555 0100"), "'+1 555 0100");
+  assert.equal(csvCell("-2+3"), "'-2+3");
+  assert.equal(csvCell("@SUM(A1)"), "'@SUM(A1)");
+  assert.equal(csvCell("\t=1+1"), "'\t=1+1");
+  assert.equal(csvCell("\r=1+1"), "\"'\r=1+1\"");
+  assert.equal(csvCell("a=b"), "a=b");
+  assert.equal(csvCell("jane@acme.io"), "jane@acme.io");
 });
 
 test("leadsforge shows status, connects with a pasted key, and disconnects", async () => {

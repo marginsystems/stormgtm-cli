@@ -29,13 +29,15 @@ Leads
   stormgtm check <email> [--deep] [--name "Jane Doe"] [--company Acme] [--github janedoe] [--json]
   stormgtm batch <file.csv> [--deep] [--wait] [--json]
   stormgtm batch-status <batch-id> [--json]
-  stormgtm outcome <email> <delivered|bounced|replied|opened|complained>
+  stormgtm outcome <email> <delivered|bounced|replied|opened|complained> [--detail "<bounce message>"] [--json]
+                                 Free. Works for email you sent by any means; exit 2 if the address is not valid
   stormgtm me [--json]
 
 Radar (beta)
   stormgtm radar "<website or description>" [--chat <chat-id>] [--json]
                                  Finds people to email; 1 credit per new lead found on the web, free if none. Exit 2 if none
-  stormgtm leads [--chat <chat-id>] [--json]
+  stormgtm leads [--chat <chat-id>] [--json | --csv]
+                                 Saved leads. --csv prints a spreadsheet-ready CSV to stdout, free
   stormgtm qualify-leads <lead-id...> [--deep] [--json]
   stormgtm add-leads <file.csv | email...> [--json]
                                  Adds your own leads, free. CSV with an email column, plus name, title, company, notes
@@ -160,7 +162,11 @@ export function parseCsv(text: string): Array<{ email: string; context?: LeadCon
 
 export function mailboxLine(mailbox: Mailbox): string {
   const state = mailbox.status === "error" ? `error (${mailbox.lastError ?? "test failed"})` : mailbox.status;
-  return `${mailbox.id}  ${mailbox.address}  ${state}  ${mailbox.caps.sentToday}/${mailbox.caps.dailyCap} today`;
+  const { caps } = mailbox;
+  const waiting = mailbox.status === "active" && caps.dailyCapOverride !== 0 && caps.dailyCap === 0 && caps.nextStepAt && caps.nextDailyCap;
+  const capacity = waiting ? `starts ${caps.nextStepAt!.slice(0, 10)} at ${caps.nextDailyCap}/day` : `${caps.sentToday}/${caps.dailyCap} today`;
+  const warming = mailbox.phase === "warming_up" && mailbox.warmup?.day ? `warming up day ${mailbox.warmup.day}/14, ` : "";
+  return `${mailbox.id}  ${mailbox.address}  ${state}  ${warming}${capacity}`;
 }
 
 export function mailboxDomainLine(domain: MailboxDomain): string {
@@ -250,10 +256,13 @@ export async function main(argv: string[], io: InboxIo = processIo): Promise<num
   }
   if (command === "outcome") {
     const [email, kind] = args;
-    if (!email || !kind || !OUTCOME_KINDS.includes(kind as OutcomeKind)) throw usageError(`stormgtm outcome <email> <${OUTCOME_KINDS.join("|")}>`);
-    const result = await client().reportOutcome({ email, kind: kind as OutcomeKind });
-    console.log(json ? JSON.stringify(result) : `recorded ${result.recorded}`);
-    return EXIT.ok;
+    const detail = flag(args, "detail");
+    if (!email || !kind || !OUTCOME_KINDS.includes(kind as OutcomeKind) || (has(args, "detail") && (!detail || detail.startsWith("--")))) throw usageError(`stormgtm outcome <email> <${OUTCOME_KINDS.join("|")}> [--detail "<bounce message>"] [--json]`);
+    const result = await client().reportOutcome({ email, kind: kind as OutcomeKind, ...(detail ? { detail } : {}) });
+    if (json) console.log(JSON.stringify(result));
+    else if (result.recorded > 0) console.log(`recorded ${result.recorded}`);
+    else console.error(`Not recorded: ${email} is not a valid email address`);
+    return result.recorded > 0 ? EXIT.ok : EXIT.rejected;
   }
   if (command === "send") {
     const from = flag(args, "from");

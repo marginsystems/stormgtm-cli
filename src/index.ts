@@ -414,13 +414,27 @@ export interface MailboxServer {
 export interface MailboxCaps {
   warmupStep: number;
   maxStep: number;
+  week?: number;
+  nextDailyCap?: number | null;
+  nextStepAt?: string | null;
   dailyCap: number;
   dailyCapOverride: number | null;
   gapMinutes: number;
   sentToday: number;
 }
 
+export type MailboxPhase = "warming_up" | "ramping" | "full" | "paused" | "needs_attention";
+
+export interface MailboxWarmup {
+  enabled: boolean;
+  dailyTarget: number;
+  day?: number;
+  coldSendsStartAt?: string | null;
+}
+
 export interface Mailbox {
+  phase?: MailboxPhase;
+  warmup?: MailboxWarmup;
   id: string;
   address: string;
   displayName: string | null;

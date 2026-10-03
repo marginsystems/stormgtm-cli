@@ -67,6 +67,7 @@ Radar (beta) finds people to email from a website URL or a description of the id
    - Leads the user already has go in with `add_leads` (CLI: `stormgtm add-leads leads.csv`), free.
 2. Radar leads are not checked yet. Qualify them with `qualify_radar_leads` (CLI: `stormgtm qualify-leads <lead-id...>`), or with `check_lead` when you have more context.
 3. Send only to leads that come back `deliverable`, following the workflow below. `list_radar_leads` (CLI: `stormgtm leads`) shows leads found earlier with their verdicts.
+4. To hand the leads to the user as a file, run `stormgtm leads --csv > leads.csv` (add `--chat <chat-id>` for one search). Exporting is free.
 
 ## Workflow
 

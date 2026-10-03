@@ -135,6 +135,20 @@ test("the mailbox-domains command prints one line per domain and send needs a se
   }
 });
 
+test("mailboxLine says when a new mailbox starts sending", () => {
+  const caps = { ...mailbox().caps, dailyCap: 0, week: 1, nextDailyCap: 10, nextStepAt: "2026-10-17T00:00:00.000Z" };
+  assert.equal(mailboxLine(mailbox({ caps })), "mbx_1  ada@acme.io  active  starts 2026-10-17 at 10/day");
+  assert.equal(mailboxLine(mailbox({ caps: { ...caps, dailyCapOverride: 0 } })), "mbx_1  ada@acme.io  active  0/0 today");
+  assert.equal(mailboxLine(mailbox({ status: "paused", caps })), "mbx_1  ada@acme.io  paused  0/0 today");
+});
+
+test("mailboxLine shows the warm-up day while a mailbox is warming up", () => {
+  const caps = { warmupStep: 0, maxStep: 6, week: 1, dailyCap: 0, dailyCapOverride: null, nextDailyCap: 10, nextStepAt: "2026-10-17T00:00:00.000Z", gapMinutes: 8, sentToday: 0 };
+  const warmup = { enabled: true, dailyTarget: 3, day: 4, coldSendsStartAt: "2026-10-17T00:00:00.000Z" };
+  assert.equal(mailboxLine(mailbox({ caps, phase: "warming_up", warmup })), "mbx_1  ada@acme.io  active  warming up day 4/14, starts 2026-10-17 at 10/day");
+  assert.equal(mailboxLine(mailbox({ phase: "ramping", warmup })), "mbx_1  ada@acme.io  active  0/5 today");
+});
+
 test("mailboxLine shows status and today's capacity", () => {
   assert.equal(mailboxLine(mailbox()), "mbx_1  ada@acme.io  active  0/5 today");
   assert.equal(mailboxLine(mailbox({ status: "error", lastError: "mailbox_auth_failed" })), "mbx_1  ada@acme.io  error (mailbox_auth_failed)  0/5 today");
