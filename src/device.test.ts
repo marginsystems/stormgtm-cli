@@ -55,11 +55,21 @@ test("terminal errors stop with a specific code", async () => {
   }
 });
 
-test("an unknown error or a network failure stops", async () => {
+test("an unknown error stops, and a network failure stops only after it keeps failing", async () => {
   const unknown = harness([{ status: 500, body: { error: "boom" } }]);
   await assert.rejects(pollDeviceLogin(unknown.options), (error: unknown) => error instanceof LoginError && error.code === "unexpected" && /boom/.test(error.message));
-  const offline = harness([new Error("offline")]);
-  await assert.rejects(pollDeviceLogin(offline.options), (error: unknown) => error instanceof LoginError && error.code === "unexpected");
+  const offline = harness([new Error("offline"), new Error("offline"), new Error("offline"), new Error("offline")]);
+  await assert.rejects(pollDeviceLogin(offline.options), (error: unknown) => error instanceof LoginError && error.code === "unexpected" && /network error/.test(error.message));
+  assert.equal(offline.posts.length, 4);
+});
+
+test("a login survives failed polls and gateway errors between good ones", async () => {
+  const approved: HttpReply = { status: 200, body: { api_key: "sgtm_live_abc", key_prefix: "sgtm_live_abc" } };
+  const flaky = harness([new Error("offline"), new Error("offline"), new Error("offline"), pending, new Error("offline"), { status: 502, body: "Bad Gateway" }, { status: 503, body: null }, approved]);
+  assert.equal((await pollDeviceLogin(flaky.options)).apiKey, "sgtm_live_abc");
+  assert.equal(flaky.posts.length, 8);
+  const down = harness([{ status: 502, body: null }, { status: 502, body: null }, { status: 502, body: null }, { status: 502, body: null }]);
+  await assert.rejects(pollDeviceLogin(down.options), (error: unknown) => error instanceof LoginError && /HTTP 502/.test(error.message));
 });
 
 test("gives up once the code's lifetime has passed", async () => {

@@ -43,6 +43,7 @@ export interface PollOptions {
 }
 
 export const SLOW_DOWN_STEP_MS = 5000;
+export const MAX_POLL_FAILURES = 3;
 
 export function makePost(baseUrl: string, fetchImpl: typeof fetch = fetch): PostJson {
   const base = baseUrl.replace(/\/+$/, "");
@@ -98,14 +99,22 @@ export async function startDeviceLogin(post: PostJson): Promise<DeviceStart> {
 export async function pollDeviceLogin(options: PollOptions): Promise<DeviceApproval> {
   const deadline = options.now() + options.expiresInSeconds * 1000;
   let intervalMs = Math.max(options.intervalSeconds, 1) * 1000;
+  let failures = 0;
   while (options.now() < deadline) {
     await options.sleep(intervalMs);
     let reply: HttpReply;
     try {
       reply = await options.post("/api/cli/device/token", { device_code: options.deviceCode });
     } catch {
-      throw new LoginError("unexpected", "Login failed: network error. Check your connection and run `stormgtm login` again.");
+      failures++;
+      if (failures > MAX_POLL_FAILURES) throw new LoginError("unexpected", "Login failed: network error. Check your connection and run `stormgtm login` again.");
+      continue;
     }
+    if (reply.status >= 502 && reply.status <= 504 && failures < MAX_POLL_FAILURES) {
+      failures++;
+      continue;
+    }
+    failures = 0;
     const apiKey = field(reply.body, "api_key");
     if (reply.status === 200 && typeof apiKey === "string" && apiKey) {
       const prefix = field(reply.body, "key_prefix");

@@ -22,6 +22,32 @@ test("sends bearer auth and json body", async () => {
   assert.deepEqual(JSON.parse(String(calls[0]!.init.body)), { email: "jane@acme.io", tier: "deep" });
 });
 
+test("read-only requests are retried on a network failure or a gateway error, and writes are not", async () => {
+  const outcomes: Array<Error | number> = [new TypeError("fetch failed"), 502, 200];
+  const calls: string[] = [];
+  const impl = (async (_url: string | URL | Request, init?: RequestInit) => {
+    calls.push(init?.method ?? "GET");
+    const next = outcomes.shift() ?? 200;
+    if (next instanceof Error) throw next;
+    return new Response(JSON.stringify(next === 200 ? { credits: 5 } : { error: { code: "bad_gateway", message: "Bad gateway" } }), { status: next });
+  }) as typeof fetch;
+  const client = new StormGTM({ apiKey: "k", baseUrl: "https://api.test", fetch: impl, retryDelayMs: 0 });
+  assert.deepEqual(await client.me(), { credits: 5 });
+  assert.deepEqual(calls, ["GET", "GET", "GET"]);
+
+  outcomes.push(new TypeError("fetch failed"), new TypeError("fetch failed"), new TypeError("fetch failed"));
+  await assert.rejects(client.me(), TypeError);
+  assert.equal(calls.length, 6);
+
+  outcomes.push(new TypeError("fetch failed"));
+  await assert.rejects(client.check({ email: "jane@acme.io" }), TypeError);
+  assert.deepEqual(calls.slice(6), ["POST"]);
+
+  outcomes.push(503, 503, 503);
+  await assert.rejects(client.me(), (error: unknown) => error instanceof StormGTMError && error.status === 503);
+  assert.equal(calls.length, 10);
+});
+
 test("maps api errors to StormGTMError", async () => {
   const { impl } = fakeFetch(() => ({ status: 402, body: { error: { code: "insufficient_credits", message: "balance is 0" } } }));
   const client = new StormGTM({ apiKey: "k", fetch: impl });

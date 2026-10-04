@@ -491,6 +491,14 @@ export interface ClientOptions {
   baseUrl?: string;
   fetch?: typeof fetch;
   timeoutMs?: number;
+  retries?: number;
+  retryDelayMs?: number;
+}
+
+const RETRIED_STATUSES = new Set([502, 503, 504]);
+
+function isNetworkFailure(error: unknown): boolean {
+  return error instanceof TypeError;
 }
 
 export const DEFAULT_BASE_URL = DEFAULT_API_URL;
@@ -518,8 +526,23 @@ export class StormGTM {
     });
   }
 
+  private async openWithRetry(method: string, path: string, body: unknown): Promise<Response> {
+    const retries = method === "GET" ? (this.options.retries ?? 2) : 0;
+    for (let attempt = 0; ; attempt++) {
+      const last = attempt >= retries;
+      try {
+        const response = await this.open(method, path, body, AbortSignal.timeout(this.options.timeoutMs ?? 60_000));
+        if (last || !RETRIED_STATUSES.has(response.status)) return response;
+        await response.body?.cancel();
+      } catch (error) {
+        if (last || !isNetworkFailure(error)) throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, (this.options.retryDelayMs ?? 400) * (attempt + 1)));
+    }
+  }
+
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const response = await this.open(method, path, body, AbortSignal.timeout(this.options.timeoutMs ?? 60_000));
+    const response = await this.openWithRetry(method, path, body);
     const data = await readBody(response);
     if (!response.ok && !(response.status === 422 && acceptsRejections(path, data))) throw apiFailure(response.status, data);
     return data as T;
