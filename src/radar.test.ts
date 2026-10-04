@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { main, USAGE } from "./cli.js";
-import { ADD_LEADS_USAGE, cmdAddLeads, cmdLeads, cmdLeadsforge, csvCell, leadLine, leadsCsv, LEADS_USAGE, LEADSFORGE_USAGE, QUALIFY_LEADS_USAGE, RADAR_USAGE, type RadarIo } from "./commands/radar.js";
+import { ADD_LEADS_USAGE, cmdAddLeads, cmdLeads, csvCell, leadLine, leadsCsv, LEADS_USAGE, QUALIFY_LEADS_USAGE, RADAR_USAGE, type RadarIo } from "./commands/radar.js";
 import { describeError, EXIT, StormGTM, StormGTMError, type RadarEvent, type RadarLead } from "./index.js";
 
 function radarLead(overrides: Partial<RadarLead> = {}): RadarLead {
@@ -165,14 +165,15 @@ test("createRadarChat sends a name only when given", async () => {
 
 test("help lists the Radar commands under their own group", () => {
   const group = USAGE.slice(USAGE.indexOf("Radar (beta)"), USAGE.indexOf("Sending (from your connected mailboxes)"));
-  for (const usage of [RADAR_USAGE, LEADS_USAGE, QUALIFY_LEADS_USAGE, ADD_LEADS_USAGE, LEADSFORGE_USAGE]) assert.ok(group.includes(usage), usage);
+  for (const usage of [RADAR_USAGE, LEADS_USAGE, QUALIFY_LEADS_USAGE, ADD_LEADS_USAGE]) assert.ok(group.includes(usage), usage);
+  assert.doesNotMatch(USAGE, /leadsforge/i);
   assert.match(group, /pass nextAfter until no leads return/);
   assert.doesNotMatch(group, /takes every lead/);
 });
 
 test("help says sends go out from connected mailboxes", () => {
   const group = USAGE.slice(USAGE.indexOf("Sending (from your connected mailboxes)"), USAGE.indexOf("Inbox (beta)"));
-  assert.match(group, /Emails go out from your own mailboxes/);
+  assert.match(group, /Emails go out from the mailboxes you connected/);
   assert.match(group, /stormgtm send \(--mailbox <mailbox-id> \| --from <mailbox address>\)/);
   assert.doesNotMatch(USAGE, /coming soon|Resend/);
   assert.match(USAGE, /stormgtm mailbox-domains/);
@@ -294,11 +295,11 @@ test("add-leads sends emails or CSV rows, reports skips, and accepts a 422 with 
   await assert.rejects(cmdAddLeads(["empty.csv"], () => api, () => [], capture()), /No leads in empty\.csv/);
 });
 
-test("leads marks where each lead came from", async () => {
+test("leads marks the ones the user added, and leads saved from Leadsforge before it was removed still list", async () => {
   const { client: api } = client(() => new Response(JSON.stringify({ leads: [radarLead(), radarLead({ id: "rld_2", email: "cto@initech.io", origin: "leadsforge", name: null, title: null, company: null }), radarLead({ id: "rld_3", email: "me@acme.io", origin: "manual", name: null, title: null, company: null })] })));
   const io = capture();
   await cmdLeads([], () => api, io);
-  assert.deepEqual(io.lines, ["rld_1  jane@acme.io  Jane Doe · CTO · Acme", "rld_2  cto@initech.io  (Leadsforge)", "rld_3  me@acme.io  (added)"]);
+  assert.deepEqual(io.lines, ["rld_1  jane@acme.io  Jane Doe · CTO · Acme", "rld_2  cto@initech.io", "rld_3  me@acme.io  (added)"]);
 });
 
 test("leads --after takes only new leads and prints the cursor for next time", async () => {
@@ -375,25 +376,6 @@ test("CSV cells that a spreadsheet would run as a formula are neutralised", () =
   assert.equal(csvCell("jane@acme.io"), "jane@acme.io");
 });
 
-test("leadsforge shows status, connects with a pasted key, and disconnects", async () => {
-  const { client: api, calls } = client((call) => {
-    if (call.method === "GET") return new Response(JSON.stringify({ leadsforge: { connected: false } }));
-    if (call.method === "PUT") return new Response(JSON.stringify({ leadsforge: { connected: true, keyHint: "…1234", credits: 100 } }));
-    return new Response(JSON.stringify({ ok: true }));
-  });
-  const io = capture();
-  await cmdLeadsforge([], () => api, io);
-  const prompts: string[] = [];
-  await cmdLeadsforge(["connect"], () => api, io, async (prompt) => (prompts.push(prompt), "  lf_live_key_1234 "));
-  await cmdLeadsforge(["disconnect"], () => api, io);
-  assert.deepEqual(io.lines, [
-    "Leadsforge is not connected. Connect it with: stormgtm leadsforge connect",
-    "Leadsforge connected (key …1234, 100 Leadsforge credits). Radar also searches the Leadsforge people database; leads found there are free.",
-    "Leadsforge disconnected.",
-  ]);
-  assert.match(prompts[0]!, /Leadsforge API key/);
-  assert.deepEqual(calls.map((call) => `${call.method} ${call.url.replace("https://api.test", "")}`), ["GET /v1/radar/leadsforge", "PUT /v1/radar/leadsforge", "DELETE /v1/radar/leadsforge"]);
-  assert.deepEqual(calls[1]!.body, { apiKey: "lf_live_key_1234" });
-  await assert.rejects(cmdLeadsforge(["connect"], () => api, io, async () => ""), /No key entered/);
-  await assert.rejects(cmdLeadsforge(["status"], () => api, io), /leadsforge \[connect/);
+test("the leadsforge command is gone", async () => {
+  await assert.rejects(main(["leadsforge"]), /Unknown command/i);
 });

@@ -1,12 +1,10 @@
 import { EXIT, usageError } from "../errors.js";
-import { readSecretLine } from "../secret-input.js";
-import type { AddLeadInput, LeadsforgeStatus, RadarEvent, RadarLead, StormGTM, Tier } from "../index.js";
+import type { AddLeadInput, RadarEvent, RadarLead, StormGTM, Tier } from "../index.js";
 
 export const RADAR_USAGE = 'stormgtm radar "<website or description>" [--chat <chat-id>] [--json]';
 export const LEADS_USAGE = "stormgtm leads [--chat <chat-id>] [--after <cursor>] [--limit <n>] [--json | --csv]";
 export const QUALIFY_LEADS_USAGE = "stormgtm qualify-leads <lead-id...> [--deep] [--json]";
 export const ADD_LEADS_USAGE = "stormgtm add-leads <file.csv | email...> [--json]";
-export const LEADSFORGE_USAGE = "stormgtm leadsforge [connect | disconnect] [--json]";
 
 const VALUE_FLAGS = new Set(["--chat", "--after", "--limit"]);
 
@@ -21,7 +19,6 @@ export const consoleRadarIo: RadarIo = {
 };
 
 export type ReadLeadsCsv = (file: string) => AddLeadInput[];
-export type ReadSecret = (prompt: string) => Promise<string>;
 
 function flag(args: string[], name: string): string | undefined {
   const index = args.indexOf(`--${name}`);
@@ -128,10 +125,8 @@ function storedLeadLine(lead: RadarLead): string {
   return `${lead.id}  ${leadLine(lead)}${lead.verdict ? `  [${lead.verdict}]` : ""}${originLabel(lead)}`;
 }
 
-const ORIGIN_LABELS: Record<RadarLead["origin"], string> = { web: "", leadsforge: "  (Leadsforge)", manual: "  (added)" };
-
 export function originLabel(lead: Pick<RadarLead, "origin">): string {
-  return ORIGIN_LABELS[lead.origin] ?? "";
+  return lead.origin === "manual" ? "  (added)" : "";
 }
 
 export async function cmdAddLeads(args: string[], client: () => StormGTM, readCsv: ReadLeadsCsv, io: RadarIo = consoleRadarIo): Promise<number> {
@@ -148,33 +143,6 @@ export async function cmdAddLeads(args: string[], client: () => StormGTM, readCs
     io.progress(`${result.leads.length} lead${result.leads.length === 1 ? "" : "s"} added, free. Qualify them with: stormgtm qualify-leads <lead-id...>`);
   }
   return result.leads.length > 0 || result.duplicates.length > 0 ? EXIT.ok : EXIT.rejected;
-}
-
-function leadsforgeLine(status: LeadsforgeStatus): string {
-  if (!status.connected) return "Leadsforge is not connected. Connect it with: stormgtm leadsforge connect";
-  const credits = status.credits === undefined ? "" : `, ${status.credits} Leadsforge credits`;
-  return `Leadsforge connected (key ${status.keyHint ?? "saved"}${credits}). Radar also searches the Leadsforge people database; leads found there are free.`;
-}
-
-export async function cmdLeadsforge(args: string[], client: () => StormGTM, io: RadarIo = consoleRadarIo, readSecret: ReadSecret = readSecretLine): Promise<number> {
-  const [action] = positionals(args);
-  const json = args.includes("--json");
-  if (action !== undefined && action !== "connect" && action !== "disconnect") throw usageError(LEADSFORGE_USAGE);
-  if (action === "disconnect") {
-    await client().disconnectLeadsforge();
-    io.out(json ? JSON.stringify({ connected: false }, null, 2) : "Leadsforge disconnected.");
-    return EXIT.ok;
-  }
-  if (action === "connect") {
-    const apiKey = (await readSecret("Paste your Leadsforge API key (Leadsforge → Usage → API & MCP): ")).trim();
-    if (!apiKey) throw usageError(`No key entered. ${LEADSFORGE_USAGE}`);
-    const status = await client().connectLeadsforge(apiKey);
-    io.out(json ? JSON.stringify(status, null, 2) : leadsforgeLine(status));
-    return EXIT.ok;
-  }
-  const status = await client().leadsforge();
-  io.out(json ? JSON.stringify(status, null, 2) : leadsforgeLine(status));
-  return EXIT.ok;
 }
 
 export async function cmdQualifyLeads(args: string[], client: () => StormGTM, io: RadarIo = consoleRadarIo): Promise<number> {

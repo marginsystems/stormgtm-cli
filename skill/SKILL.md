@@ -62,8 +62,7 @@ stormgtm login
 
 Radar (beta) finds people to email from a website URL or a description of the ideal customer.
 
-1. Call `find_leads` with the URL or description (CLI: `stormgtm radar "acme.io"`). It can take a minute or two. Each new lead found on the web costs 1 credit; searches that find nobody are free. Pass the returned `chatId` to refine the same search.
-   - If the user has Leadsforge, connect it once with `connect_leadsforge` (CLI: `stormgtm leadsforge connect`). `find_leads` then also searches the Leadsforge people database by role, company and tech stack, and those leads are free in StormGTM.
+1. Call `find_leads` with the URL or description (CLI: `stormgtm radar "acme.io"`). It can take a minute or two. Each new lead costs 1 credit; searches that find nobody are free. Pass the returned `chatId` to refine the same search.
    - Leads the user already has go in with `add_leads` (CLI: `stormgtm add-leads leads.csv`), free.
 2. Radar leads are not checked yet. Qualify them with `qualify_radar_leads` (CLI: `stormgtm qualify-leads <lead-id...>`), or with `check_lead` when you have more context.
 3. Send only to leads that come back `deliverable`, following the workflow below. `list_radar_leads` (CLI: `stormgtm leads`) shows leads found earlier with their verdicts.

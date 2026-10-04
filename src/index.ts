@@ -365,14 +365,6 @@ export interface AddLeadsResult {
   rejected: Array<{ index: number; code: string; message: string }>;
 }
 
-export interface LeadsforgeStatus {
-  connected: boolean;
-  keyHint?: string;
-  connectedAt?: string;
-  updatedAt?: string;
-  credits?: number;
-}
-
 export type RadarEvent =
   | { type: "user_message"; message: RadarMessage }
   | { type: "chat_renamed"; name: string }
@@ -759,18 +751,6 @@ export class StormGTM {
 
   addRadarLeads(leads: AddLeadInput[]): Promise<AddLeadsResult> {
     return this.request("POST", "/v1/radar/leads", { leads });
-  }
-
-  async leadsforge(): Promise<LeadsforgeStatus> {
-    return (await this.request<{ leadsforge: LeadsforgeStatus }>("GET", "/v1/radar/leadsforge")).leadsforge;
-  }
-
-  async connectLeadsforge(apiKey: string): Promise<LeadsforgeStatus> {
-    return (await this.request<{ leadsforge: LeadsforgeStatus }>("PUT", "/v1/radar/leadsforge", { apiKey })).leadsforge;
-  }
-
-  async disconnectLeadsforge(): Promise<void> {
-    await this.request("DELETE", "/v1/radar/leadsforge");
   }
 
   qualifyRadarLeads(ids: string[], tier?: Tier): Promise<{ leads: RadarLead[]; remaining: number }> {

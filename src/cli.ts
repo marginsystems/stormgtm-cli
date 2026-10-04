@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { cmdLogin, cmdLogout, cmdWhoami } from "./commands/auth.js";
 import { cmdConfig, cmdKeys } from "./commands/config.js";
 import { cmdCounts, cmdInbox, cmdRead, cmdReply, cmdThread, cmdThreadAction, isThreadAction, processIo, type InboxIo } from "./commands/inbox.js";
-import { cmdAddLeads, cmdLeads, cmdLeadsforge, cmdQualifyLeads, cmdRadar } from "./commands/radar.js";
+import { cmdAddLeads, cmdLeads, cmdQualifyLeads, cmdRadar } from "./commands/radar.js";
 import { cmdSkill } from "./commands/skill.js";
 import { VERSION } from "./version.js";
 import { resolveApiUrl } from "./config.js";
@@ -35,15 +35,13 @@ Leads
 
 Radar (beta)
   stormgtm radar "<website or description>" [--chat <chat-id>] [--json]
-                                 Finds people to email; 1 credit per new lead found on the web, free if none. Exit 2 if none
+                                 Finds people to email; 1 credit per new lead, free if none. Exit 2 if none
   stormgtm leads [--chat <chat-id>] [--after <cursor>] [--limit <n>] [--json | --csv]
                                  Saved leads. --csv prints a spreadsheet-ready CSV to stdout, free
                                  --after 0 starts an oldest-first page; pass nextAfter until no leads return, then keep it for next time
   stormgtm qualify-leads <lead-id...> [--deep] [--json]
   stormgtm add-leads <file.csv | email...> [--json]
                                  Adds your own leads, free. CSV with an email column, plus name, title, company, notes
-  stormgtm leadsforge [connect | disconnect] [--json]
-                                 Radar also searches your Leadsforge database; leads found there are free. connect asks for the key
 
 Mailboxes (beta)
   stormgtm mailboxes [--json]    Connected mailboxes with status and daily cap
@@ -53,7 +51,7 @@ Mailboxes (beta)
                                  Sending domains with their unsubscribe host and whether it is verified
 
 Sending (from your connected mailboxes)
-  Emails go out from your own mailboxes; set each domain's unsubscribe host first (see mailbox-domains).
+  Emails go out from the mailboxes you connected; set each domain's unsubscribe host first (see mailbox-domains).
   stormgtm send (--mailbox <mailbox-id> | --from <mailbox address>) --to <email> --subject <text> (--text <body> | --html-file <file>) [--key <idempotency-key>] [--json]
   stormgtm domains [--json]
   stormgtm domain-health <domain-id> [--json]
@@ -178,7 +176,7 @@ export function mailboxDomainLine(domain: MailboxDomain): string {
 
 const OUTCOME_KINDS: OutcomeKind[] = ["delivered", "bounced", "replied", "opened", "complained"];
 
-const KNOWN_COMMANDS = new Set(["me", "mailboxes", "mailbox-test", "mailbox-domains", "check", "batch", "batch-status", "outcome", "send", "domains", "domain-health", "emails", "sequences", "sequence", "enroll", "inbox", "thread", "reply", "read", "unread", "archive", "unarchive", "spam", "unspam", "counts", "radar", "leads", "qualify-leads", "add-leads", "leadsforge"]);
+const KNOWN_COMMANDS = new Set(["me", "mailboxes", "mailbox-test", "mailbox-domains", "check", "batch", "batch-status", "outcome", "send", "domains", "domain-health", "emails", "sequences", "sequence", "enroll", "inbox", "thread", "reply", "read", "unread", "archive", "unarchive", "spam", "unspam", "counts", "radar", "leads", "qualify-leads", "add-leads"]);
 
 export async function main(argv: string[], io: InboxIo = processIo): Promise<number> {
   const [command, ...args] = argv;
@@ -212,7 +210,6 @@ export async function main(argv: string[], io: InboxIo = processIo): Promise<num
   if (command === "leads") return cmdLeads(args, client);
   if (command === "qualify-leads") return cmdQualifyLeads(args, client);
   if (command === "add-leads") return cmdAddLeads(args, client, (file) => parseCsv(readFileSync(file, "utf8")).map(({ email, context }) => ({ email, name: context?.name, title: context?.title, company: context?.company, note: context?.notes })));
-  if (command === "leadsforge") return cmdLeadsforge(args, client);
 
   if (command === "me") {
     const me = await client().me();

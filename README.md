@@ -84,10 +84,9 @@ stormgtm leads --csv > leads.csv             # the same leads as a CSV file, fre
 stormgtm leads --after 0 --json              # only leads after a cursor, oldest first, as { leads, nextAfter }; pass nextAfter next time
 stormgtm qualify-leads <lead-id> <lead-id> [--deep]
 stormgtm add-leads leads.csv                 # your own leads, free; CSV with email plus name, title, company, notes
-stormgtm leadsforge connect                  # paste a Leadsforge API key; Radar then also searches Leadsforge
 ```
 
-`radar` costs 1 credit per new lead found on the web. Leads from a connected Leadsforge account, leads you add with `add-leads`, and searches that find nobody are free. `radar` exits 2 when it finds nobody. A search can take a minute or two. Qualify the leads before you send to them.
+`radar` costs 1 credit per new lead. Leads you add with `add-leads` and searches that find nobody are free. A search needs at least 1 credit to start and stops when credits run out. `radar` exits 2 when it finds nobody. A search can take a minute or two. Qualify the leads before you send to them.
 
 `leads --csv` prints name, email, title, company, company site, source URL, note, verdict and found date. Exporting is free. Cells that start with `=`, `+`, `-` or `@` get a leading `'` so a spreadsheet does not run them as formulas.
 

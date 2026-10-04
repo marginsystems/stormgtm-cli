@@ -1,11 +1,11 @@
 ---
 name: stormgtm-send
-description: Send email through StormGTM from the user's own mailboxes, follow each sender's warm-up, run follow-up sequences, read the inbox and answer replies, and handle bounces.
+description: Send email through StormGTM from the mailboxes the user has connected, follow each sender's warm-up, run follow-up sequences, read the inbox and answer replies, and handle bounces.
 ---
 
 # StormGTM Send
 
-Use this skill to send checked leads email from the user's own mailboxes, at a pace that protects their reputation.
+Use this skill to send checked leads email from the mailboxes the user has connected to StormGTM, at a pace that protects their reputation.
 
 ## When to use
 
